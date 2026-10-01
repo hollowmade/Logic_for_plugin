@@ -1,5 +1,6 @@
 package ru.logic.tierplugin.tracker;
 
+import ru.logic.tierplugin.core.FightMetrics;
 import ru.logic.tierplugin.core.Gamemode;
 
 import java.util.UUID;
@@ -96,6 +97,18 @@ public class FightSession {
     }
 
     // ── Helpers ────────────────────────────────────────────────
+
+    /** Snapshot of one participant's telemetry for the rating core. */
+    public FightMetrics metricsOf(UUID uuid) {
+        return player1.equals(uuid)
+                ? new FightMetrics(p1Hits, p1Misses, p1DamageDealt, p1DamageTaken, p1MaxCombo)
+                : new FightMetrics(p2Hits, p2Misses, p2DamageDealt, p2DamageTaken, p2MaxCombo);
+    }
+
+    /** Kills/rounds won by the given participant. */
+    public int scoreOf(UUID uuid) {
+        return player1.equals(uuid) ? p1Score : p2Score;
+    }
 
     /** @return true if this session involves the given player */
     public boolean involves(UUID uuid) {

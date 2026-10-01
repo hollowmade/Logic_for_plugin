@@ -1,52 +1,49 @@
 package ru.logic.tierplugin.tracker;
 
+import org.bukkit.Bukkit;
+import org.bukkit.entity.Player;
 import ru.logic.tierplugin.LogicTierPlugin;
 import ru.logic.tierplugin.core.Gamemode;
-import ru.logic.tierplugin.core.PlayerProfile;
-import ru.logic.tierplugin.core.TierEngine;
-import ru.logic.tierplugin.storage.PlayerProfileRepository;
+import ru.logic.tierplugin.core.MatchInput;
+import ru.logic.tierplugin.core.MatchOutcome;
 
-import java.util.*;
+import java.util.Map;
+import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.logging.Level;
 
 /**
- * Manages active {@link FightSession}s and converts them into rating/skill
- * updates when a fight ends.
- *
- * <h3>Anti-abuse: Diminishing Returns</h3>
- * Each pair of players has a daily match counter. The rating gain multiplier
- * decreases for repeated matches against the same opponent
- * ({@code elo.diminishing_returns}, default 100 / 70 / 50 / 30 / 10 %).
- * A hard cap ({@code max_daily_rated_matches_per_opponent}) is enforced; beyond
- * it, the match still plays out but grants 0 Elo change.
+ * Manages active {@link FightSession}s and hands finished fights to storage,
+ * which rates and persists them off the main thread.
+ * <p>
+ * Repeat-match protection lives in the rating core and is counted from the
+ * {@code matches} table, so the daily pair limit survives restarts.
  */
 public class FightTracker {
 
     private final LogicTierPlugin plugin;
-    private final PlayerProfileRepository repo;
 
     /** Active sessions keyed by each participant's UUID. */
     private final Map<UUID, FightSession> activeSessions = new ConcurrentHashMap<>();
 
-    /**
-     * Daily match counter per ordered pair (lower UUID first).
-     * Key: "uuid1:uuid2", Value: matches played today.
-     * Cleared daily via {@link #clearDailyCounters()}.
-     */
-    private final Map<String, Integer> dailyMatchCounts = new ConcurrentHashMap<>();
-
     public FightTracker(LogicTierPlugin plugin) {
         this.plugin = plugin;
-        this.repo   = new PlayerProfileRepository(plugin);
     }
 
     // ── Session lifecycle ──────────────────────────────────────
 
-    /** Starts a new fight session between two players. */
-    public void startFight(UUID p1, UUID p2, Gamemode gamemode) {
+    /**
+     * Starts a new fight session between two players.
+     *
+     * @return false if either player is already fighting
+     */
+    public boolean startFight(UUID p1, UUID p2, Gamemode gamemode) {
+        if (p1.equals(p2) || isInFight(p1) || isInFight(p2)) return false;
         FightSession session = new FightSession(p1, p2, gamemode);
         activeSessions.put(p1, session);
         activeSessions.put(p2, session);
+        return true;
     }
 
     /** @return the active session for the given player, or empty */
@@ -59,103 +56,72 @@ public class FightTracker {
         return activeSessions.containsKey(uuid);
     }
 
-    /**
-     * Ends the fight, updates Elo / Skill Score / tier, and persists.
-     *
-     * @param winner UUID of the winner
-     */
+    /** Ends the fight with {@code winner} as the winner and submits it for rating. */
     public void endFight(UUID winner) {
-        FightSession session = activeSessions.get(winner);
-        if (session == null) return;
+        FightSession s = remove(winner);
+        if (s == null) return;
 
-        UUID loser = session.getOpponent(winner);
-        activeSessions.remove(session.getPlayer1());
-        activeSessions.remove(session.getPlayer2());
+        UUID loser = s.getOpponent(winner);
+        MatchInput in = new MatchInput(s.getGamemode(),
+                s.scoreOf(winner), s.scoreOf(loser),
+                s.metricsOf(winner), s.metricsOf(loser),
+                s.getDurationMillis());
 
-        processResult(session, winner, loser);
+        plugin.getStorage().recordMatch(winner, loser, in, plugin.getRatingService())
+                .whenComplete((out, err) -> plugin.sync(() -> {
+                    if (err != null) {
+                        plugin.getLogger().log(Level.SEVERE, "Failed to record match", err);
+                        notify(winner, "§cMatch could not be saved, ratings unchanged.");
+                        notify(loser, "§cMatch could not be saved, ratings unchanged.");
+                        return;
+                    }
+                    report(winner, s.getGamemode(), out, out.winner(), true);
+                    report(loser, s.getGamemode(), out, out.loser(), false);
+                }));
     }
 
-    // ── Core processing ────────────────────────────────────────
-
-    private void processResult(FightSession s, UUID winnerId, UUID loserId) {
-        TierEngine engine = plugin.getTierEngine();
-        PlayerProfile winner = repo.findByUuid(winnerId)
-                .orElseGet(() -> engine.newProfile(winnerId, "Unknown"));
-        PlayerProfile loser  = repo.findByUuid(loserId)
-                .orElseGet(() -> engine.newProfile(loserId, "Unknown"));
-
-        // ── 1. Diminishing returns ──────────────────────────────
-        String pairKey = pairKey(winnerId, loserId);
-        int matchNum = dailyMatchCounts.merge(pairKey, 1, Integer::sum);
-        // 0 past the daily cap → fight is unrated (no Elo change)
-        double diminishing = engine.getConfig().elo().diminishingFactor(matchNum);
-
-        // ── 2. Elo update ───────────────────────────────────────
-        var eloCalc = engine.getEloCalculator();
-        double wExp = eloCalc.expectedScore(winner.getEloRating(), loser.getEloRating());
-        double lExp = 1.0 - wExp;
-
-        // Match quality: closer fight = higher signal; scaled by diminishing factor
-        double quality = eloCalc.matchQuality(
-                winnerId.equals(s.getPlayer1()) ? s.getP1Score() : s.getP2Score(),
-                winnerId.equals(s.getPlayer1()) ? s.getP2Score() : s.getP1Score(),
-                diminishing);
-
-        winner.setEloRating(eloCalc.newRating(
-                winner.getEloRating(), winner.getRatingDeviation(), wExp, 1.0, quality));
-        loser.setEloRating(eloCalc.newRating(
-                loser.getEloRating(),  loser.getRatingDeviation(),  lExp, 0.0, quality));
-
-        winner.setRatingDeviation(eloCalc.reduceRd(winner.getRatingDeviation()));
-        loser.setRatingDeviation(eloCalc.reduceRd(loser.getRatingDeviation()));
-
-        // ── 3. Skill Score update (winner only) ─────────────────
-        boolean p1Wins = winnerId.equals(s.getPlayer1());
-        int wHits   = p1Wins ? s.getP1Hits()        : s.getP2Hits();
-        int wMisses = p1Wins ? s.getP1Misses()      : s.getP2Misses();
-        int wDmg    = p1Wins ? s.getP1DamageDealt() : s.getP2DamageDealt();
-        int wCombo  = p1Wins ? s.getP1MaxCombo()    : s.getP2MaxCombo();
-
-        var skillCalc = plugin.getTierEngine().getSkillCalculator();
-        double newSkill = skillCalc.calculate(wHits, wMisses, wDmg, wCombo, s.getGamemode());
-        // Exponential moving average (alpha = 0.2) — stabilises score over time
-        winner.setSkillScore(winner.getSkillScore() * 0.8 + newSkill * 0.2);
-
-        // ── 4. Fight counts & confidence ───────────────────────
-        winner.setTotalFights(winner.getTotalFights() + 1);
-        loser.setTotalFights(loser.getTotalFights()   + 1);
-
-        // Confidence grows faster for winners (more informative result)
-        winner.setConfidence(Math.min(1.0, winner.getConfidence() + 0.025));
-        loser.setConfidence(Math.min(1.0, loser.getConfidence()   + 0.015));
-
-        // ── 5. Tier evaluation & persist ───────────────────────
-        plugin.getTierEngine().evaluate(winner);
-        plugin.getTierEngine().evaluate(loser);
-
-        repo.save(winner);
-        repo.save(loser);
-    }
-
-    // ── Utilities ──────────────────────────────────────────────
-
-    /**
-     * Canonical pair key: always puts the smaller UUID first
-     * so A-vs-B and B-vs-A share the same counter.
-     */
-    private String pairKey(UUID a, UUID b) {
-        return a.compareTo(b) < 0
-                ? a + ":" + b
-                : b + ":" + a;
-    }
-
-    /** Clears the daily match counters (call at midnight or server restart). */
-    public void clearDailyCounters() {
-        dailyMatchCounts.clear();
+    /** Drops the fight of {@code participant} without touching any rating. */
+    public void cancelFight(UUID participant) {
+        remove(participant);
     }
 
     public void shutdown() {
         activeSessions.clear();
-        dailyMatchCounts.clear();
+    }
+
+    // ── Internals ──────────────────────────────────────────────
+
+    private FightSession remove(UUID participant) {
+        FightSession s = activeSessions.get(participant);
+        if (s == null) return null;
+        activeSessions.remove(s.getPlayer1(), s);
+        activeSessions.remove(s.getPlayer2(), s);
+        return s;
+    }
+
+    private void report(UUID uuid, Gamemode gm, MatchOutcome out, MatchOutcome.Side side, boolean won) {
+        if (!out.rated()) {
+            notify(uuid, "§7Unrated match: daily limit vs this opponent reached ("
+                    + out.matchNumberToday() + " today).");
+            return;
+        }
+        double d = side.eloDelta();
+        notify(uuid, (won ? "§aVictory" : "§cDefeat") + " §7[" + gm + "] Elo §f"
+                + Math.round(side.eloBefore()) + " → " + Math.round(side.eloAfter())
+                + (d >= 0 ? " §a(+" : " §c(") + Math.round(d) + ")"
+                + (out.weight() < 0.999 ? String.format(" §8weight %.0f%%", out.weight() * 100) : ""));
+        if (side.tierChanged()) {
+            notify(uuid, "§6Tier: §f" + name(side.tierBefore()) + " → " + name(side.tierAfter())
+                    + (side.provisional() ? " §7(provisional)" : ""));
+        }
+    }
+
+    private static String name(Object tier) {
+        return tier == null ? "Unranked" : tier.toString();
+    }
+
+    private static void notify(UUID uuid, String msg) {
+        Player p = Bukkit.getPlayer(uuid);
+        if (p != null) p.sendMessage(msg);
     }
 }

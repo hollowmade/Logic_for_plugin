@@ -13,7 +13,7 @@ public record CoreConfig(
         Map<Tier, TierThreshold> tiers,
         Elo elo,
         Skill skill,
-        double provisionalThreshold,
+        TierRules tierRules,
         int scoreDiffCap
 ) {
 
@@ -21,21 +21,27 @@ public record CoreConfig(
         tiers = Map.copyOf(tiers);
     }
 
-    /** Requirements a profile must meet to hold a tier. */
+    /** Requirements a rating must meet to hold a tier. */
     public record TierThreshold(double minElo, double minSkill, double minConfidence, int minFights) {}
 
     /**
      * Elo parameters and anti-abuse settings.
      *
+     * @param minRd              RD never drops below this; it is the "fully confident" point
+     * @param rdDecayPerMatch    RD is multiplied by this after every rated match
      * @param diminishingReturns multipliers for the 1st, 2nd, 3rd… match against
      *                           the same opponent in a day; the last value applies to all further matches
      */
     public record Elo(double initialRating, double initialRd, double initialVolatility,
+                      double minRd, double rdDecayPerMatch,
                       double[] diminishingReturns, int maxDailyRatedMatchesPerOpponent) {
 
         public Elo {
             if (diminishingReturns.length == 0) {
                 throw new IllegalArgumentException("diminishing_returns must not be empty");
+            }
+            if (minRd <= 0 || minRd >= initialRd) {
+                throw new IllegalArgumentException("min_rd must be in (0, initial_rd)");
             }
             diminishingReturns = diminishingReturns.clone();
         }
@@ -48,8 +54,8 @@ public record CoreConfig(
         }
     }
 
-    /** Skill Score normalisation caps and per-gamemode weights. */
-    public record Skill(int damageCap, int comboCap, Map<Gamemode, Weights> weights) {
+    /** Skill Score normalisation caps, per-gamemode weights and EMA smoothing. */
+    public record Skill(int damageCap, int comboCap, double emaAlpha, Map<Gamemode, Weights> weights) {
 
         public Skill {
             weights = Map.copyOf(weights);
@@ -63,6 +69,12 @@ public record CoreConfig(
     public record Weights(double accuracy, double damage, double combo) {
         public static final Weights DEFAULT = new Weights(0.40, 0.35, 0.25);
     }
+
+    /**
+     * @param placementFights   until this many fights the tier is a temporary estimate
+     * @param demotionBufferElo a fixed tier is kept until Elo falls this far below its threshold
+     */
+    public record TierRules(int placementFights, double demotionBufferElo) {}
 
     /** Defaults matching the shipped config.yml; handy for tests. */
     public static CoreConfig defaults() {
@@ -85,9 +97,9 @@ public record CoreConfig(
 
         return new CoreConfig(
                 tiers,
-                new Elo(1000, 350, 0.06, new double[]{1.00, 0.70, 0.50, 0.30, 0.10}, 20),
-                new Skill(200, 20, weights),
-                0.60,
+                new Elo(1000, 350, 0.06, 60, 0.97, new double[]{1.00, 0.70, 0.50, 0.30, 0.10}, 20),
+                new Skill(200, 20, 0.2, weights),
+                new TierRules(10, 30),
                 15);
     }
 }

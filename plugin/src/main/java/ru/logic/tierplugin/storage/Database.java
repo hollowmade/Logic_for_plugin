@@ -2,120 +2,217 @@ package ru.logic.tierplugin.storage;
 
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
-import ru.logic.tierplugin.LogicTierPlugin;
-
 import java.sql.Connection;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
- * Manages the database connection pool and schema initialisation.
- * Supports SQLite (default) with a path to MySQL migration in the future.
+ * Connection pool, schema and the single database thread.
+ * <p>
+ * All SQL runs on one dedicated thread, never on the server main thread, so a
+ * slow disk or a remote MySQL cannot freeze the game. Running everything on one
+ * thread also serialises work: a match is read, rated and written as one unit
+ * without racing another match of the same player.
  */
 public class Database {
 
-    private final LogicTierPlugin plugin;
-    private HikariDataSource dataSource;
-    private final Logger log;
+    /** A unit of work executed inside one transaction. */
+    @FunctionalInterface
+    public interface SqlWork<T> {
+        T run(Connection conn) throws SQLException;
+    }
 
-    public Database(LogicTierPlugin plugin) {
-        this.plugin = plugin;
-        this.log = plugin.getLogger();
+    private final Logger log;
+    private final SqlDialect dialect;
+    private final HikariDataSource dataSource;
+    private final ExecutorService executor = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "LogicTier-DB");
+        t.setDaemon(true);
+        return t;
+    });
+
+    /**
+     * Opens the pool and creates missing tables.
+     *
+     * @throws SQLException if the database is unreachable or the schema cannot be created
+     */
+    public Database(DatabaseSettings settings, Logger log) throws SQLException {
+        this.log = log;
+        this.dialect = settings.dialect();
+        this.dataSource = new HikariDataSource(hikariConfig(settings));
+        try {
+            new Schema(dialect, log).create(dataSource);
+        } catch (SQLException e) {
+            dataSource.close();
+            throw e;
+        }
+        log.info("Database ready (" + dialect + ").");
+    }
+
+    public SqlDialect dialect() { return dialect; }
+
+    private HikariConfig hikariConfig(DatabaseSettings s) {
+        HikariConfig hc = new HikariConfig();
+        hc.setPoolName("LogicTierPool");
+
+        if (dialect == SqlDialect.MYSQL) {
+            // Paper ships mysql-connector-j, so it is not shaded into the plugin
+            hc.setDriverClassName("com.mysql.cj.jdbc.Driver");
+            hc.setJdbcUrl("jdbc:mysql://" + s.host() + ":" + s.port() + "/" + s.name()
+                    + "?useSSL=false&allowPublicKeyRetrieval=true&characterEncoding=UTF-8");
+            hc.setUsername(s.user());
+            hc.setPassword(s.password());
+            hc.setMaximumPoolSize(s.poolSize());
+        } else {
+            s.sqliteFile().getAbsoluteFile().getParentFile().mkdirs();
+            hc.setJdbcUrl("jdbc:sqlite:" + s.sqliteFile().getAbsolutePath());
+            hc.setMaximumPoolSize(1); // SQLite allows a single writer
+        }
+        return hc;
     }
 
     /**
-     * Initialises the connection pool and creates tables if absent.
-     *
-     * @return true on success
+     * Runs {@code work} on the database thread inside a transaction.
+     * Commits on success, rolls back and completes exceptionally on failure.
      */
-    public boolean init() {
-        try {
-            HikariConfig config = buildHikariConfig();
-            dataSource = new HikariDataSource(config);
-            createTables();
-            log.info("Database initialised successfully.");
-            return true;
-        } catch (Exception e) {
-            log.severe("Database init failed: " + e.getMessage());
-            e.printStackTrace();
-            return false;
-        }
+    public <T> CompletableFuture<T> submit(SqlWork<T> work) {
+        return CompletableFuture.supplyAsync(() -> {
+            try (Connection conn = dataSource.getConnection()) {
+                conn.setAutoCommit(false);
+                try {
+                    T result = work.run(conn);
+                    conn.commit();
+                    return result;
+                } catch (SQLException | RuntimeException e) {
+                    conn.rollback();
+                    throw e;
+                }
+            } catch (SQLException e) {
+                log.log(Level.SEVERE, "Database operation failed", e);
+                throw new StorageException(e);
+            }
+        }, executor);
     }
 
-    private HikariConfig buildHikariConfig() {
-        HikariConfig cfg = new HikariConfig();
-        String type = plugin.getConfig().getString("database.type", "sqlite");
-
-        if ("mysql".equalsIgnoreCase(type)) {
-            String host = plugin.getConfig().getString("database.host", "localhost");
-            int    port = plugin.getConfig().getInt("database.port", 3306);
-            String name = plugin.getConfig().getString("database.name", "tierplugin");
-            cfg.setJdbcUrl("jdbc:mysql://" + host + ":" + port + "/" + name
-                    + "?useSSL=false&autoReconnect=true&characterEncoding=UTF-8");
-            cfg.setUsername(plugin.getConfig().getString("database.user", "root"));
-            cfg.setPassword(plugin.getConfig().getString("database.password", ""));
-            cfg.setMaximumPoolSize(plugin.getConfig().getInt("database.pool-size", 5));
-        } else {
-            String file = plugin.getDataFolder().getAbsolutePath() + "/"
-                    + plugin.getConfig().getString("database.file", "tierplugin.db");
-            cfg.setJdbcUrl("jdbc:sqlite:" + file);
-            cfg.setMaximumPoolSize(1); // SQLite is single-threaded
-        }
-
-        cfg.setPoolName("LogicTierPool");
-        return cfg;
-    }
-
-    private void createTables() throws SQLException {
-        try (Connection conn = dataSource.getConnection();
-             Statement stmt = conn.createStatement()) {
-
-            stmt.executeUpdate("""
-                CREATE TABLE IF NOT EXISTS player_profiles (
-                    uuid             TEXT PRIMARY KEY,
-                    last_name        TEXT,
-                    elo_rating       REAL DEFAULT 1000,
-                    rating_deviation REAL DEFAULT 350,
-                    volatility       REAL DEFAULT 0.06,
-                    skill_score      REAL DEFAULT 0,
-                    confidence       REAL DEFAULT 0,
-                    total_fights     INTEGER DEFAULT 0,
-                    tier             TEXT,
-                    provisional      INTEGER DEFAULT 1,
-                    last_updated     INTEGER DEFAULT 0
-                )
-                """);
-
-            stmt.executeUpdate("""
-                CREATE TABLE IF NOT EXISTS fight_history (
-                    id             INTEGER PRIMARY KEY AUTOINCREMENT,
-                    winner_uuid    TEXT NOT NULL,
-                    loser_uuid     TEXT NOT NULL,
-                    gamemode       TEXT NOT NULL,
-                    winner_score   INTEGER,
-                    loser_score    INTEGER,
-                    mechanics      REAL,
-                    combat         REAL,
-                    decision       REAL,
-                    movement       REAL,
-                    consistency    REAL,
-                    adaptation     REAL,
-                    duration_ms    INTEGER,
-                    played_at      INTEGER DEFAULT 0
-                )
-                """);
-        }
-    }
-
-    /** @return a connection from the pool */
-    public Connection getConnection() throws SQLException {
-        return dataSource.getConnection();
-    }
-
+    /** Waits for queued writes to finish, then closes the pool. */
     public void close() {
-        if (dataSource != null && !dataSource.isClosed()) {
-            dataSource.close();
+        executor.shutdown();
+        try {
+            if (!executor.awaitTermination(10, TimeUnit.SECONDS)) {
+                log.warning("Database queue did not drain in 10s; some writes may be lost.");
+                executor.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        dataSource.close();
+    }
+
+    /** Unchecked wrapper so failures travel through CompletableFuture. */
+    public static class StorageException extends RuntimeException {
+        public StorageException(Throwable cause) { super(cause); }
+    }
+
+    /** DDL for all tables; identical for both dialects apart from the bits in {@link SqlDialect}. */
+    private record Schema(SqlDialect dialect, Logger log) {
+
+        void create(HikariDataSource ds) throws SQLException {
+            try (Connection conn = ds.getConnection(); Statement st = conn.createStatement()) {
+                dropEmptyLegacy(st, "player_profiles");
+                dropEmptyLegacy(st, "fight_history");
+
+                st.executeUpdate("""
+                    CREATE TABLE IF NOT EXISTS players (
+                        uuid       VARCHAR(36) PRIMARY KEY,
+                        name       VARCHAR(16) NOT NULL,
+                        first_seen BIGINT NOT NULL,
+                        last_seen  BIGINT NOT NULL
+                    )""");
+
+                st.executeUpdate("""
+                    CREATE TABLE IF NOT EXISTS ratings (
+                        uuid        VARCHAR(36) NOT NULL,
+                        gamemode    VARCHAR(16) NOT NULL,
+                        elo         DOUBLE NOT NULL,
+                        rd          DOUBLE NOT NULL,
+                        volatility  DOUBLE NOT NULL,
+                        skill       DOUBLE NOT NULL,
+                        confidence  DOUBLE NOT NULL,
+                        fights      INT NOT NULL,
+                        wins        INT NOT NULL,
+                        losses      INT NOT NULL,
+                        tier        VARCHAR(4),
+                        provisional INT NOT NULL,
+                        updated_at  BIGINT NOT NULL,
+                        PRIMARY KEY (uuid, gamemode)
+                    )""");
+
+                st.executeUpdate("""
+                    CREATE TABLE IF NOT EXISTS matches (
+                        id                %s,
+                        gamemode          VARCHAR(16) NOT NULL,
+                        pair_key          VARCHAR(73) NOT NULL,
+                        winner_uuid       VARCHAR(36) NOT NULL,
+                        loser_uuid        VARCHAR(36) NOT NULL,
+                        winner_score      INT NOT NULL,
+                        loser_score       INT NOT NULL,
+                        duration_ms       BIGINT NOT NULL,
+                        match_number      INT NOT NULL,
+                        weight            DOUBLE NOT NULL,
+                        winner_elo_before DOUBLE NOT NULL,
+                        winner_elo_after  DOUBLE NOT NULL,
+                        loser_elo_before  DOUBLE NOT NULL,
+                        loser_elo_after   DOUBLE NOT NULL,
+                        played_at         BIGINT NOT NULL
+                    )""".formatted(dialect.autoIdColumn()));
+
+                st.executeUpdate("""
+                    CREATE TABLE IF NOT EXISTS metrics (
+                        match_id     BIGINT NOT NULL,
+                        uuid         VARCHAR(36) NOT NULL,
+                        hits         INT NOT NULL,
+                        misses       INT NOT NULL,
+                        damage_dealt INT NOT NULL,
+                        damage_taken INT NOT NULL,
+                        max_combo    INT NOT NULL,
+                        fight_skill  DOUBLE NOT NULL,
+                        PRIMARY KEY (match_id, uuid)
+                    )""");
+
+                index(st, "idx_players_name", "players", "name");
+                index(st, "idx_matches_pair", "matches", "pair_key, gamemode, played_at");
+                index(st, "idx_matches_winner", "matches", "winner_uuid");
+                index(st, "idx_matches_loser", "matches", "loser_uuid");
+            }
+        }
+
+        private void index(Statement st, String name, String table, String columns) throws SQLException {
+            try {
+                st.executeUpdate(dialect.createIndex(name, table, columns));
+            } catch (SQLException e) {
+                if (!dialect.isDuplicateIndex(e)) throw e;
+            }
+        }
+
+        /** Stage-0 tables were never written to; drop them only if they are still empty. */
+        private void dropEmptyLegacy(Statement st, String table) {
+            try (ResultSet rs = st.executeQuery("SELECT COUNT(*) FROM " + table)) {
+                if (rs.next() && rs.getLong(1) == 0) {
+                    st.executeUpdate("DROP TABLE " + table);
+                    log.info("Dropped empty legacy table " + table + ".");
+                } else {
+                    log.warning("Legacy table " + table + " has data and was left untouched.");
+                }
+            } catch (SQLException ignored) {
+                // table does not exist — nothing to migrate
+            }
         }
     }
 }

@@ -31,6 +31,13 @@ tasks {
     test {
         useJUnitPlatform()
     }
+    // Offline formula check: hundreds of virtual matches, prints a report
+    register<JavaExec>("runSimulation") {
+        group = "verification"
+        description = "Runs the rating simulator (core only, no server needed)"
+        classpath = sourceSets["main"].runtimeClasspath
+        mainClass.set("ru.logic.tierplugin.core.Simulator")
+    }
     shadowJar {
         archiveClassifier.set("")
         relocate("com.zaxxer.hikari", "ru.logic.libs.hikari")

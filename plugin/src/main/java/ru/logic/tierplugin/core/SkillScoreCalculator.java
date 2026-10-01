@@ -18,33 +18,26 @@ public class SkillScoreCalculator {
         this.config = config;
     }
 
-    /**
-     * Computes the Skill Score for a player using raw fight telemetry.
-     *
-     * @param hits         number of successful hits
-     * @param misses       number of missed attacks
-     * @param damageDealt  total damage dealt (HP × 2 in vanilla)
-     * @param maxCombo     maximum combo streak achieved
-     * @param gamemode     PvP gamemode for per-mode weight lookup
-     * @return skill score in [0, 100]
-     */
-    public double calculate(int hits, int misses, int damageDealt, int maxCombo, Gamemode gamemode) {
+    /** @return skill score of a single fight in [0, 100] */
+    public double calculate(FightMetrics m, Gamemode gamemode) {
         CoreConfig.Skill skill = config.skill();
         CoreConfig.Weights w = skill.weightsFor(gamemode);
 
-        // Accuracy: 0–100 straight from hit %
-        int totalSwings = hits + misses;
-        double accuracyScore = totalSwings == 0 ? 50.0
-                : 100.0 * hits / totalSwings;
-
-        // Damage: normalised to 0–100 against configurable cap (default 200 HP worth)
-        double damageScore = Math.min(100.0, 100.0 * damageDealt / skill.damageCap());
-
-        // Combo: normalised to 0–100 against configurable cap (default 20 hits)
-        double comboScore = Math.min(100.0, 100.0 * maxCombo / skill.comboCap());
+        // No swings recorded → neutral accuracy rather than a penalty
+        double accuracyScore = m.accuracy() < 0 ? 50.0 : m.accuracy();
+        double damageScore = Math.min(100.0, 100.0 * m.damageDealt() / skill.damageCap());
+        double comboScore = Math.min(100.0, 100.0 * m.maxCombo() / skill.comboCap());
 
         return w.accuracy() * accuracyScore
              + w.damage()   * damageScore
              + w.combo()    * comboScore;
+    }
+
+    /** Folds one fight into the running score (exponential moving average). */
+    public double update(double current, int fightsBefore, double fightScore) {
+        // The first fight sets the score directly instead of dragging it up from 0
+        if (fightsBefore == 0) return fightScore;
+        double a = config.skill().emaAlpha();
+        return current * (1 - a) + fightScore * a;
     }
 }

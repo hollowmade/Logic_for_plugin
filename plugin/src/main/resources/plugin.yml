@@ -2,7 +2,7 @@ name: LogicTierPlugin
 version: 1.0.0-SNAPSHOT
 main: ru.logic.tierplugin.LogicTierPlugin
 api-version: '1.21'
-description: PvP Tier Testing System with Elo/Glicko rating
+description: PvP tier system with per-gamemode Elo and automatic LT5-HT1 tiers
 authors: [Logic]
 
 commands:
@@ -12,7 +12,7 @@ commands:
     permission: tierplugin.tier
   tieradmin:
     description: Admin tier management
-    usage: /tieradmin <set|reset|info> <player> [args]
+    usage: /tieradmin <set|reset|info|fight|simulate|stats> [args]
     permission: tierplugin.admin
   duel:
     description: Manage duels

@@ -1,12 +1,19 @@
 package ru.logic.tierplugin.core;
 
 /**
- * Simplified Glicko-2-inspired rating update.
- * <p>
- * Full Glicko-2 will be implemented in a later iteration;
- * this class provides a correct, abuse-resistant foundation.
+ * Elo update with Glicko-style weighting by opponent reliability.
+ * <ul>
+ *   <li>Opponent strength enters through the expected score: beating a
+ *       higher-rated player yields more than beating a weaker one.</li>
+ *   <li>Opponent reliability enters through {@code g(RD)}: a result against
+ *       a fresh account (high RD) carries less weight than one against an
+ *       established player, which blunts boosting with new alts.</li>
+ *   <li>Own K-factor scales with own RD: newcomers move fast, veterans are stable.</li>
+ * </ul>
  */
 public class EloCalculator {
+
+    private static final double Q = Math.log(10) / 400.0;
 
     private final CoreConfig config;
 
@@ -14,66 +21,64 @@ public class EloCalculator {
         this.config = config;
     }
 
-    /**
-     * Computes the expected score for player A against player B.
-     *
-     * @param ratingA Elo of player A
-     * @param ratingB Elo of player B
-     * @return expected score in [0, 1]
-     */
-    public double expectedScore(double ratingA, double ratingB) {
-        return 1.0 / (1.0 + Math.pow(10.0, (ratingB - ratingA) / 400.0));
+    /** Glicko attenuation factor: 1.0 for a perfectly known opponent, lower for uncertain ones. */
+    public double g(double opponentRd) {
+        return 1.0 / Math.sqrt(1.0 + 3.0 * Q * Q * opponentRd * opponentRd / (Math.PI * Math.PI));
     }
 
     /**
-     * Calculates the K-factor based on rating deviation (confidence proxy).
-     * Higher RD → higher K (more volatile), lower RD → lower K (stable).
+     * Expected score of a player against an opponent, attenuated by the opponent's RD.
+     *
+     * @return value in (0, 1)
+     */
+    public double expectedScore(double rating, double opponentRating, double opponentRd) {
+        return 1.0 / (1.0 + Math.pow(10.0, -g(opponentRd) * (rating - opponentRating) / 400.0));
+    }
+
+    /**
+     * K-factor from own rating deviation.
+     * RD of initial_rd (new player) → K=64; RD at min_rd (stable) → K=16.
      */
     public double kFactor(double rd) {
-        // RD of 350 (new player) → K≈64; RD of 60 (stable) → K≈16
-        return Math.max(16, Math.min(64, rd * 64.0 / 350.0));
+        CoreConfig.Elo e = config.elo();
+        double t = (rd - e.minRd()) / (e.initialRd() - e.minRd());
+        return 16 + 48 * Math.max(0, Math.min(1, t));
     }
 
     /**
-     * Calculates the rating change for a player.
+     * Rating change for one side of a match.
      *
-     * @param rating          current rating
-     * @param rd              current rating deviation
-     * @param expectedScore   expected outcome [0,1]
-     * @param actualScore     actual outcome [0,1] (1=win, 0=loss, 0.5=draw)
-     * @param matchQuality    multiplier in [0,1] accounting for opponent strength & anti-abuse
-     * @return new rating
+     * @param actualScore 1 = win, 0 = loss, 0.5 = draw
+     * @param weight      anti-abuse × match-quality multiplier in [0, 1]
      */
-    public double newRating(double rating, double rd, double expectedScore,
-                            double actualScore, double matchQuality) {
-        double k = kFactor(rd);
-        double delta = k * matchQuality * (actualScore - expectedScore);
-        return rating + delta;
+    public double delta(double rating, double rd, double opponentRating, double opponentRd,
+                        double actualScore, double weight) {
+        double expected = expectedScore(rating, opponentRating, opponentRd);
+        return kFactor(rd) * weight * g(opponentRd) * (actualScore - expected);
     }
 
-    /**
-     * Reduces Rating Deviation after a rated match (simplified Glicko step).
-     *
-     * @param rd current RD
-     * @return reduced RD (floored at 60)
-     */
+    /** RD after a rated match: shrinks geometrically, floored at min_rd. */
     public double reduceRd(double rd) {
-        return Math.max(60.0, rd * 0.97);
+        CoreConfig.Elo e = config.elo();
+        return Math.max(e.minRd(), rd * e.rdDecayPerMatch());
+    }
+
+    /** Confidence 0–1: 0 at initial RD, 1 at min RD. */
+    public double confidence(double rd) {
+        CoreConfig.Elo e = config.elo();
+        double c = (e.initialRd() - rd) / (e.initialRd() - e.minRd());
+        return Math.max(0, Math.min(1, c));
     }
 
     /**
-     * Computes match quality multiplier from the score difference.
+     * Match quality multiplier from the score difference: a 1-0 thriller says
+     * more about relative skill than a 10-0 stomp.
      *
-     * @param winnerScore   e.g. kills by winner
-     * @param loserScore    e.g. kills by loser
-     * @param diminishingFactor anti-abuse diminishing returns factor [0,1]
-     * @return quality multiplier in [0,1]
+     * @return value in [0.5, 1]
      */
-    public double matchQuality(int winnerScore, int loserScore, double diminishingFactor) {
-        int cap = config.scoreDiffCap();
+    public double scoreQuality(int winnerScore, int loserScore) {
+        int cap = Math.max(1, config.scoreDiffCap());
         int diff = Math.min(Math.abs(winnerScore - loserScore), cap);
-        // Closer fight = higher quality signal
-        double scoreFactor = 1.0 - (diff / (double) cap) * 0.5;
-        return scoreFactor * diminishingFactor;
+        return 1.0 - (diff / (double) cap) * 0.5;
     }
 }
