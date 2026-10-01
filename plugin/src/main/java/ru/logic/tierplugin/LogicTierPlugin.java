@@ -2,6 +2,7 @@ package ru.logic.tierplugin;
 
 import org.bukkit.plugin.java.JavaPlugin;
 import ru.logic.tierplugin.adapter.BukkitEventAdapter;
+import ru.logic.tierplugin.adapter.ConfigLoader;
 import ru.logic.tierplugin.commands.DuelCommand;
 import ru.logic.tierplugin.commands.TierAdminCommand;
 import ru.logic.tierplugin.commands.TierCommand;
@@ -40,7 +41,7 @@ public final class LogicTierPlugin extends JavaPlugin {
         }
 
         // 2. Core engine
-        tierEngine = new TierEngine(this);
+        tierEngine = new TierEngine(ConfigLoader.load(getConfig(), log));
 
         // 3. Tracker
         fightTracker = new FightTracker(this);

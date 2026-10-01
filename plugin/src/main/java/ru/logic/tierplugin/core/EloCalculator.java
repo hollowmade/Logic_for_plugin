@@ -1,7 +1,5 @@
 package ru.logic.tierplugin.core;
 
-import ru.logic.tierplugin.LogicTierPlugin;
-
 /**
  * Simplified Glicko-2-inspired rating update.
  * <p>
@@ -10,10 +8,10 @@ import ru.logic.tierplugin.LogicTierPlugin;
  */
 public class EloCalculator {
 
-    private final LogicTierPlugin plugin;
+    private final CoreConfig config;
 
-    public EloCalculator(LogicTierPlugin plugin) {
-        this.plugin = plugin;
+    public EloCalculator(CoreConfig config) {
+        this.config = config;
     }
 
     /**
@@ -64,7 +62,7 @@ public class EloCalculator {
     }
 
     /**
-     * Computes match quality multiplier based on PerformanceRating weights from config.
+     * Computes match quality multiplier from the score difference.
      *
      * @param winnerScore   e.g. kills by winner
      * @param loserScore    e.g. kills by loser
@@ -72,7 +70,7 @@ public class EloCalculator {
      * @return quality multiplier in [0,1]
      */
     public double matchQuality(int winnerScore, int loserScore, double diminishingFactor) {
-        int cap = plugin.getConfig().getInt("match_rating.score_diff_cap", 15);
+        int cap = config.scoreDiffCap();
         int diff = Math.min(Math.abs(winnerScore - loserScore), cap);
         // Closer fight = higher quality signal
         double scoreFactor = 1.0 - (diff / (double) cap) * 0.5;

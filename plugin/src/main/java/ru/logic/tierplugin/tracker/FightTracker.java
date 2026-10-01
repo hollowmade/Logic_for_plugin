@@ -3,6 +3,7 @@ package ru.logic.tierplugin.tracker;
 import ru.logic.tierplugin.LogicTierPlugin;
 import ru.logic.tierplugin.core.Gamemode;
 import ru.logic.tierplugin.core.PlayerProfile;
+import ru.logic.tierplugin.core.TierEngine;
 import ru.logic.tierplugin.storage.PlayerProfileRepository;
 
 import java.util.*;
@@ -14,14 +15,8 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * <h3>Anti-abuse: Diminishing Returns</h3>
  * Each pair of players has a daily match counter. The rating gain multiplier
- * decreases for repeated matches against the same opponent:
- * <pre>
- *   Match 1  → 100 %
- *   Match 2  → 70 %
- *   Match 3  → 50 %
- *   Match 4  → 30 %
- *   Match 5+ → 10 %
- * </pre>
+ * decreases for repeated matches against the same opponent
+ * ({@code elo.diminishing_returns}, default 100 / 70 / 50 / 30 / 10 %).
  * A hard cap ({@code max_daily_rated_matches_per_opponent}) is enforced; beyond
  * it, the match still plays out but grants 0 Elo change.
  */
@@ -39,9 +34,6 @@ public class FightTracker {
      * Cleared daily via {@link #clearDailyCounters()}.
      */
     private final Map<String, Integer> dailyMatchCounts = new ConcurrentHashMap<>();
-
-    // Diminishing-return multipliers indexed by match number (1-based, capped at index 5)
-    private static final double[] DIMINISHING = { 0, 1.00, 0.70, 0.50, 0.30, 0.10 };
 
     public FightTracker(LogicTierPlugin plugin) {
         this.plugin = plugin;
@@ -86,25 +78,20 @@ public class FightTracker {
     // ── Core processing ────────────────────────────────────────
 
     private void processResult(FightSession s, UUID winnerId, UUID loserId) {
+        TierEngine engine = plugin.getTierEngine();
         PlayerProfile winner = repo.findByUuid(winnerId)
-                .orElseGet(() -> new PlayerProfile(winnerId, "Unknown"));
+                .orElseGet(() -> engine.newProfile(winnerId, "Unknown"));
         PlayerProfile loser  = repo.findByUuid(loserId)
-                .orElseGet(() -> new PlayerProfile(loserId, "Unknown"));
+                .orElseGet(() -> engine.newProfile(loserId, "Unknown"));
 
         // ── 1. Diminishing returns ──────────────────────────────
         String pairKey = pairKey(winnerId, loserId);
         int matchNum = dailyMatchCounts.merge(pairKey, 1, Integer::sum);
-        int maxRated = plugin.getConfig().getInt("elo.max_daily_rated_matches_per_opponent", 20);
-
-        double diminishing = 0.0;
-        if (matchNum <= maxRated) {
-            int idx = Math.min(matchNum, DIMINISHING.length - 1);
-            diminishing = DIMINISHING[idx];
-        }
-        // If diminishing == 0 fight is unrated (no Elo change)
+        // 0 past the daily cap → fight is unrated (no Elo change)
+        double diminishing = engine.getConfig().elo().diminishingFactor(matchNum);
 
         // ── 2. Elo update ───────────────────────────────────────
-        var eloCalc = plugin.getTierEngine().getEloCalculator();
+        var eloCalc = engine.getEloCalculator();
         double wExp = eloCalc.expectedScore(winner.getEloRating(), loser.getEloRating());
         double lExp = 1.0 - wExp;
 

@@ -47,7 +47,7 @@ public class TierAdminCommand implements CommandExecutor {
 
         Optional<PlayerProfile> opt = repo.findByUuid(target.getUniqueId());
         PlayerProfile profile = opt.orElseGet(() ->
-                new PlayerProfile(target.getUniqueId(), target.getName()));
+                plugin.getTierEngine().newProfile(target.getUniqueId(), target.getName()));
 
         switch (sub) {
             case "set" -> {
@@ -63,7 +63,7 @@ public class TierAdminCommand implements CommandExecutor {
                 }
             }
             case "reset" -> {
-                PlayerProfile fresh = new PlayerProfile(target.getUniqueId(), target.getName());
+                PlayerProfile fresh = plugin.getTierEngine().newProfile(target.getUniqueId(), target.getName());
                 repo.save(fresh);
                 sender.sendMessage("§aReset " + target.getName() + "'s profile.");
             }

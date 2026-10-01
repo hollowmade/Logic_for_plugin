@@ -23,3 +23,6 @@ plugin/.gradle/
 plugin/build/
 .idea/
 *.iml
+
+# Local backups
+_backup_*/

@@ -25,12 +25,14 @@ public class PlayerProfile {
     private Tier tier;
     private boolean provisional;
 
-    public PlayerProfile(UUID uuid, String lastName) {
+    /** Use {@link TierEngine#newProfile} to get the configured initial values. */
+    public PlayerProfile(UUID uuid, String lastName,
+                         double eloRating, double ratingDeviation, double volatility) {
         this.uuid = uuid;
         this.lastName = lastName;
-        this.eloRating = 1000;
-        this.ratingDeviation = 350;
-        this.volatility = 0.06;
+        this.eloRating = eloRating;
+        this.ratingDeviation = ratingDeviation;
+        this.volatility = volatility;
         this.skillScore = 0;
         this.confidence = 0;
         this.totalFights = 0;

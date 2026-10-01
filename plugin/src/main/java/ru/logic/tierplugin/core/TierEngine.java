@@ -1,7 +1,6 @@
 package ru.logic.tierplugin.core;
 
-import org.bukkit.configuration.ConfigurationSection;
-import ru.logic.tierplugin.LogicTierPlugin;
+import java.util.UUID;
 
 /**
  * Central tier-determination engine.
@@ -11,22 +10,29 @@ import ru.logic.tierplugin.LogicTierPlugin;
  */
 public class TierEngine {
 
-    private final LogicTierPlugin plugin;
+    private final CoreConfig config;
     private final SkillScoreCalculator skillCalc;
     private final EloCalculator eloCalc;
 
-    public TierEngine(LogicTierPlugin plugin) {
-        this.plugin = plugin;
-        this.skillCalc = new SkillScoreCalculator(plugin);
-        this.eloCalc   = new EloCalculator(plugin);
+    public TierEngine(CoreConfig config) {
+        this.config    = config;
+        this.skillCalc = new SkillScoreCalculator(config);
+        this.eloCalc   = new EloCalculator(config);
     }
 
+    public CoreConfig getConfig() { return config; }
     public SkillScoreCalculator getSkillCalculator() { return skillCalc; }
     public EloCalculator getEloCalculator() { return eloCalc; }
 
+    /** Creates a fresh profile with the configured initial Elo / RD / volatility. */
+    public PlayerProfile newProfile(UUID uuid, String name) {
+        CoreConfig.Elo elo = config.elo();
+        return new PlayerProfile(uuid, name, elo.initialRating(), elo.initialRd(), elo.initialVolatility());
+    }
+
     /**
      * Determines and sets the current tier for {@code profile}.
-     * Iterates tiers from highest to lowest and assigns the first one
+     * Walks tiers from lowest to highest and keeps the last one
      * whose thresholds are fully satisfied.
      */
     public void evaluate(PlayerProfile profile) {
@@ -39,25 +45,16 @@ public class TierEngine {
         }
 
         profile.setTier(resolved);
-
-        double provisionalThreshold = plugin.getConfig()
-                .getDouble("confidence.provisional_threshold", 0.60);
-        profile.setProvisional(profile.getConfidence() < provisionalThreshold || resolved == null);
+        profile.setProvisional(profile.getConfidence() < config.provisionalThreshold() || resolved == null);
     }
 
     private boolean meetsThreshold(PlayerProfile profile, Tier tier) {
-        String key = "tiers." + tier.name();
-        ConfigurationSection cfg = plugin.getConfig().getConfigurationSection(key);
-        if (cfg == null) return false;
+        CoreConfig.TierThreshold t = config.tiers().get(tier);
+        if (t == null) return false;
 
-        double minElo        = cfg.getDouble("min_elo", 0);
-        double minSkill      = cfg.getDouble("min_skill", 0);
-        double minConfidence = cfg.getDouble("min_confidence", 0);
-        int    minFights     = cfg.getInt("min_fights", 0);
-
-        return profile.getEloRating()  >= minElo
-            && profile.getSkillScore() >= minSkill
-            && profile.getConfidence() >= minConfidence
-            && profile.getTotalFights() >= minFights;
+        return profile.getEloRating()   >= t.minElo()
+            && profile.getSkillScore()  >= t.minSkill()
+            && profile.getConfidence()  >= t.minConfidence()
+            && profile.getTotalFights() >= t.minFights();
     }
 }

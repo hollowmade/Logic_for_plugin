@@ -73,10 +73,8 @@ public class PlayerProfileRepository {
 
     private PlayerProfile map(ResultSet rs) throws SQLException {
         UUID uuid = UUID.fromString(rs.getString("uuid"));
-        PlayerProfile p = new PlayerProfile(uuid, rs.getString("last_name"));
-        p.setEloRating(rs.getDouble("elo_rating"));
-        p.setRatingDeviation(rs.getDouble("rating_deviation"));
-        p.setVolatility(rs.getDouble("volatility"));
+        PlayerProfile p = new PlayerProfile(uuid, rs.getString("last_name"),
+                rs.getDouble("elo_rating"), rs.getDouble("rating_deviation"), rs.getDouble("volatility"));
         p.setSkillScore(rs.getDouble("skill_score"));
         p.setConfidence(rs.getDouble("confidence"));
         p.setTotalFights(rs.getInt("total_fights"));
