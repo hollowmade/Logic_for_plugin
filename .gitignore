@@ -26,3 +26,4 @@ plugin/build/
 
 # Local backups
 _backup_*/
+/.console_history
