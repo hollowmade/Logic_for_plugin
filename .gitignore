@@ -1,0 +1,25 @@
+# Server runtime (not versioned)
+server.jar
+cache/
+libraries/
+versions/
+logs/
+world/
+world_nether/
+world_the_end/
+config/
+plugins/
+/*.yml
+/*.json
+/server.properties
+/eula.txt
+
+# Local Gradle distribution
+gradle-8.8-bin.zip
+gradle-dist/
+
+# Build output
+plugin/.gradle/
+plugin/build/
+.idea/
+*.iml

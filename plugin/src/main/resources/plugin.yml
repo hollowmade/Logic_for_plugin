@@ -1,0 +1,31 @@
+name: LogicTierPlugin
+version: 1.0.0-SNAPSHOT
+main: ru.logic.tierplugin.LogicTierPlugin
+api-version: '1.21'
+description: PvP Tier Testing System with Elo/Glicko rating
+authors: [Logic]
+
+commands:
+  tier:
+    description: Show player tier info
+    usage: /tier [player]
+    permission: tierplugin.tier
+  tieradmin:
+    description: Admin tier management
+    usage: /tieradmin <set|reset|info> <player> [args]
+    permission: tierplugin.admin
+  duel:
+    description: Manage duels
+    usage: /duel <request|accept|decline> [player]
+    permission: tierplugin.duel
+
+permissions:
+  tierplugin.tier:
+    description: View tier information
+    default: true
+  tierplugin.duel:
+    description: Use duel system
+    default: true
+  tierplugin.admin:
+    description: Admin commands
+    default: op
