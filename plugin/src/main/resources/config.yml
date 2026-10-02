@@ -2,6 +2,7 @@
 #  LogicTierPlugin - Configuration
 # ============================================================
 
+# SQLite is the default. How to switch to MySQL and where to host it: docs/MYSQL.md
 database:
   type: sqlite          # sqlite | mysql
   file: tierplugin.db   # for sqlite only

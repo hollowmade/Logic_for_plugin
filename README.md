@@ -47,7 +47,7 @@ gradlew.bat runSimulation
 
 Таблицы `players`, `ratings` (игрок × режим), `matches`, `metrics` (игрок × матч).
 По умолчанию SQLite (`plugins/LogicTierPlugin/tierplugin.db`); для MySQL — `database.type: mysql`
-в `config.yml` (драйвер уже есть в Paper). Все запросы идут в отдельном потоке, главный поток сервера не блокируется.
+в `config.yml` (драйвер уже есть в Paper). Подробно, включая выбор хостинга: [docs/MYSQL.md](docs/MYSQL.md). Все запросы идут в отдельном потоке, главный поток сервера не блокируется.
 
 ## Запуск сервера
 
