@@ -112,6 +112,12 @@ skill_weights:
     damage:   0.30
     combo:    0.30
 
+# ── Combat metrics tracker ───────────────────────────────────────────────────
+metrics:
+  combo_timeout_ms: 1500   # a hit streak breaks if the next hit comes later than this
+  combo_min_length: 2      # shortest streak counted as a combo (for avg / median)
+  summary_fights: 20       # /tieradmin metrics aggregates this many recent fights
+
 # ── Match quality cap ────────────────────────────────────────────────────────
 match_rating:
   score_diff_cap: 15   # max kills difference used in quality calculation

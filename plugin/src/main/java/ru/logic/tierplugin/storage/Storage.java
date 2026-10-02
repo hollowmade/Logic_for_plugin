@@ -34,6 +34,16 @@ public class Storage {
     /** A known player: UUID and last seen name. */
     public record PlayerRef(UUID uuid, String name) {}
 
+    /**
+     * Aggregate of a player's most recent fights in one gamemode.
+     *
+     * @param accuracy pooled hit percentage (all hits / all swings), -1 if no swings
+     */
+    public record MetricsSummary(int fights, int wins, double accuracy,
+                                 double avgDamageDealt, double avgDamageTaken,
+                                 int bestCombo, double avgCombo, double avgMedianCombo,
+                                 double avgCps, int peakCps, double avgFightSkill) {}
+
     private static final List<String> PLAYER_COLUMNS = List.of("uuid", "name", "first_seen", "last_seen");
     private static final List<String> RATING_COLUMNS = List.of(
             "uuid", "gamemode", "elo", "rd", "volatility", "skill", "confidence",
@@ -43,7 +53,8 @@ public class Storage {
             "duration_ms", "match_number", "weight",
             "winner_elo_before", "winner_elo_after", "loser_elo_before", "loser_elo_after", "played_at");
     private static final List<String> METRIC_COLUMNS = List.of(
-            "match_id", "uuid", "hits", "misses", "damage_dealt", "damage_taken", "max_combo", "fight_skill");
+            "match_id", "uuid", "swings", "hits", "misses", "damage_dealt", "damage_taken",
+            "max_combo", "avg_combo", "median_combo", "combo_count", "avg_cps", "max_cps", "fight_skill");
 
     private final Database db;
     private final Clock clock;
@@ -144,6 +155,35 @@ public class Storage {
             saveRating(conn, winner);
             saveRating(conn, loser);
             return out;
+        });
+    }
+
+    /** Aggregates the player's last {@code limit} fights in {@code gamemode}; empty if none. */
+    public CompletableFuture<Optional<MetricsSummary>> metricsSummary(UUID uuid, Gamemode gamemode, int limit) {
+        return db.submit(conn -> {
+            String sql = """
+                    SELECT COUNT(*), SUM(won), SUM(hits), SUM(swings),
+                           AVG(damage_dealt), AVG(damage_taken), MAX(max_combo),
+                           AVG(avg_combo), AVG(median_combo), AVG(avg_cps), MAX(max_cps), AVG(fight_skill)
+                    FROM (SELECT m.*, CASE WHEN x.winner_uuid = m.uuid THEN 1 ELSE 0 END AS won
+                          FROM metrics m JOIN matches x ON x.id = m.match_id
+                          WHERE m.uuid = ? AND x.gamemode = ?
+                          ORDER BY x.played_at DESC, x.id DESC
+                          LIMIT ?) recent""";
+            try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                ps.setString(1, uuid.toString());
+                ps.setString(2, gamemode.name());
+                ps.setInt(3, limit);
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (!rs.next() || rs.getInt(1) == 0) return Optional.empty();
+                    long hits = rs.getLong(3), swings = rs.getLong(4);
+                    return Optional.of(new MetricsSummary(
+                            rs.getInt(1), rs.getInt(2),
+                            swings == 0 ? -1 : Math.min(100.0, 100.0 * hits / swings),
+                            rs.getDouble(5), rs.getDouble(6), rs.getInt(7),
+                            rs.getDouble(8), rs.getDouble(9), rs.getDouble(10), rs.getInt(11), rs.getDouble(12)));
+                }
+            }
         });
     }
 
@@ -273,12 +313,18 @@ public class Storage {
         try (PreparedStatement ps = conn.prepareStatement(SqlDialect.insert("metrics", METRIC_COLUMNS))) {
             ps.setLong(1, matchId);
             ps.setString(2, uuid.toString());
-            ps.setInt(3, m.hits());
-            ps.setInt(4, m.misses());
-            ps.setInt(5, m.damageDealt());
-            ps.setInt(6, m.damageTaken());
-            ps.setInt(7, m.maxCombo());
-            ps.setDouble(8, fightSkill);
+            ps.setInt(3, m.swings());
+            ps.setInt(4, m.hits());
+            ps.setInt(5, m.misses());
+            ps.setDouble(6, m.damageDealt());
+            ps.setDouble(7, m.damageTaken());
+            ps.setInt(8, m.maxCombo());
+            ps.setDouble(9, m.avgCombo());
+            ps.setDouble(10, m.medianCombo());
+            ps.setInt(11, m.combos());
+            ps.setDouble(12, m.avgCps());
+            ps.setInt(13, m.maxCps());
+            ps.setDouble(14, fightSkill);
             ps.executeUpdate();
         }
     }

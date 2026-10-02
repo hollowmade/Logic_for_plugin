@@ -8,9 +8,12 @@ LogicTierPlugin: демо-плагин автоматической выдачи
   - `core` — чистая логика без Bukkit: Elo по режимам, защита от повторных матчей,
     Skill Score, тир-движок (временный тир → фиксация), симулятор
   - `storage` — SQLite/MySQL через общий диалект, асинхронная запись в отдельном потоке
-  - `tracker` — сессии боя и метрики (точность, урон, комбо)
+  - `tracker` — метрики боя без Bukkit: взмахи, попадания, урон нанесённый/полученный,
+    точность, CPS (средний и пиковый), комбо (макс., средняя и медианная длина серии).
+    О боях знает только через интерфейс `ActiveFights`
+  - `fight` — жизненный цикл боя (старт, победа, отмена); реализует `ActiveFights`
   - `commands` — `/tier`, `/tieradmin`, `/duel` (заглушка)
-  - `adapter` — слушатели событий Bukkit и `ConfigLoader` (config.yml → `CoreConfig`)
+  - `adapter` — слушатели Bukkit (`FightListener`, `MetricsListener`) и `ConfigLoader`
 - `logic.md`, `logic_demo.md`, `realization.md` — проектные заметки
 
 ## Сборка
@@ -37,6 +40,7 @@ gradlew.bat runSimulation
 | `/tieradmin simulate [игроков] [дней]` | прогнать симулятор прямо в игре |
 | `/tieradmin set <игрок> <режим> <тир>` | выставить тир вручную |
 | `/tieradmin reset <игрок> [режим]` | сбросить рейтинг |
+| `/tieradmin metrics <игрок> [режим]` | метрики текущего боя и сводка по последним 20 боям |
 | `/tieradmin info <игрок>`, `/tieradmin stats` | диагностика |
 
 ## База данных

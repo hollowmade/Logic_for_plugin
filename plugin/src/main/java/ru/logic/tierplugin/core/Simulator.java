@@ -116,7 +116,7 @@ public final class Simulator {
 
     private static MatchInput fakeMatch() {
         return new MatchInput(Gamemode.SWORD, 1, 0,
-                new FightMetrics(20, 10, 100, 40, 6), new FightMetrics(5, 25, 40, 100, 2), 30_000);
+                FightMetrics.basic(20, 10, 100, 40, 6), FightMetrics.basic(5, 25, 40, 100, 2), 30_000);
     }
 
     // ── internals ───────────────────────────────────────────────
@@ -157,7 +157,7 @@ public final class Simulator {
         int hits = (int) Math.round(swings * acc);
         int damage = (int) clamp(60 + 140 * q + rnd.nextGaussian() * 20 + (won ? 15 : -15), 0, 400);
         int combo = (int) clamp(3 + 15 * q + rnd.nextGaussian() * 2, 0, hits);
-        return new FightMetrics(hits, swings - hits, damage, 0, combo);
+        return FightMetrics.basic(hits, swings - hits, damage, 0, combo);
     }
 
     /** Spearman rank correlation between hidden true skill and final Elo. */

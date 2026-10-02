@@ -18,7 +18,7 @@ class RatingCoreTest {
 
     private static MatchInput sword() {
         return new MatchInput(Gamemode.SWORD, 1, 0,
-                new FightMetrics(20, 10, 120, 60, 6), new FightMetrics(10, 20, 60, 120, 3), 30_000);
+                FightMetrics.basic(20, 10, 120, 60, 6), FightMetrics.basic(10, 20, 60, 120, 3), 30_000);
     }
 
     // ── Elo ─────────────────────────────────────────────────────
@@ -108,8 +108,8 @@ class RatingCoreTest {
     @Test
     void skillScoreStaysInRange() {
         SkillScoreCalculator calc = service.getSkillCalculator();
-        assertEquals(100.0, calc.calculate(new FightMetrics(50, 0, 1000, 0, 40), Gamemode.SWORD), 1e-9);
-        assertEquals(50.0, calc.calculate(new FightMetrics(10, 10, 100, 0, 10), Gamemode.CRYSTAL), 1e-9);
+        assertEquals(100.0, calc.calculate(FightMetrics.basic(50, 0, 1000, 0, 40), Gamemode.SWORD), 1e-9);
+        assertEquals(50.0, calc.calculate(FightMetrics.basic(10, 10, 100, 0, 10), Gamemode.CRYSTAL), 1e-9);
     }
 
     @Test

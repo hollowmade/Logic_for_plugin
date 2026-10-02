@@ -7,6 +7,7 @@ import ru.logic.tierplugin.core.Gamemode;
 import ru.logic.tierplugin.core.Tier;
 import ru.logic.tierplugin.storage.DatabaseSettings;
 import ru.logic.tierplugin.storage.SqlDialect;
+import ru.logic.tierplugin.tracker.TrackerSettings;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -17,7 +18,8 @@ import java.util.logging.Logger;
 
 /**
  * Translates config.yml into Bukkit-free settings objects
- * ({@link CoreConfig} for the rating core, {@link DatabaseSettings} for storage).
+ * ({@link CoreConfig} for the rating core, {@link DatabaseSettings} for storage,
+ * {@link TrackerSettings} for the metrics tracker).
  * Missing keys fall back to {@link CoreConfig#defaults()}.
  */
 public final class ConfigLoader {
@@ -84,6 +86,13 @@ public final class ConfigLoader {
                 skill,
                 rules,
                 cfg.getInt("match_rating.score_diff_cap", d.scoreDiffCap()));
+    }
+
+    public static TrackerSettings tracker(FileConfiguration cfg) {
+        TrackerSettings d = TrackerSettings.DEFAULTS;
+        return new TrackerSettings(
+                cfg.getLong("metrics.combo_timeout_ms", d.comboTimeoutMs()),
+                cfg.getInt("metrics.combo_min_length", d.comboMinLength()));
     }
 
     public static DatabaseSettings database(FileConfiguration cfg, File dataFolder) {

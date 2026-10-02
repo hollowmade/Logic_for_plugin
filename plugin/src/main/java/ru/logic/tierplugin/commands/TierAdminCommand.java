@@ -11,6 +11,7 @@ import ru.logic.tierplugin.core.Gamemode;
 import ru.logic.tierplugin.core.ModeRating;
 import ru.logic.tierplugin.core.Simulator;
 import ru.logic.tierplugin.core.Tier;
+import ru.logic.tierplugin.fight.FightManager;
 import ru.logic.tierplugin.storage.Storage;
 
 import java.util.Arrays;
@@ -23,11 +24,12 @@ import java.util.function.Consumer;
  */
 public class TierAdminCommand implements TabExecutor {
 
-    private static final List<String> SUBS = List.of("set", "reset", "info", "fight", "simulate", "stats");
+    private static final List<String> SUBS = List.of("set", "reset", "info", "metrics", "fight", "simulate", "stats");
     private static final String USAGE = String.join("\n",
             "§e/tieradmin set <player> <mode> <tier>",
             "§e/tieradmin reset <player> [mode]",
             "§e/tieradmin info <player>",
+            "§e/tieradmin metrics <player> [mode] §7— live fight + last fights summary",
             "§e/tieradmin fight <player1> <player2> [mode] §7— start a tracked fight",
             "§e/tieradmin simulate [players] [days] §7— offline formula check",
             "§e/tieradmin stats");
@@ -54,6 +56,7 @@ public class TierAdminCommand implements TabExecutor {
             case "set" -> set(sender, args);
             case "reset" -> reset(sender, args);
             case "info" -> info(sender, args);
+            case "metrics" -> metrics(sender, args);
             case "fight" -> fight(sender, args);
             case "simulate" -> simulate(sender, args);
             case "stats" -> plugin.getStorage().countMatches().whenComplete((n, err) -> plugin.sync(() ->
@@ -113,6 +116,34 @@ public class TierAdminCommand implements TabExecutor {
                 })));
     }
 
+    private void metrics(CommandSender sender, String[] args) {
+        if (args.length < 2) { sender.sendMessage("§cUsage: /tieradmin metrics <player> [mode]"); return; }
+        Optional<Gamemode> parsed = args.length >= 3 ? Gamemode.parse(args[2]) : Optional.of(Gamemode.SWORD);
+        if (parsed.isEmpty()) { sender.sendMessage("§cModes: " + Arrays.toString(Gamemode.values())); return; }
+        Gamemode gm = parsed.get();
+        int limit = plugin.getMetricsSummaryFights();
+
+        withPlayer(sender, args[1], ref -> plugin.getStorage().metricsSummary(ref.uuid(), gm, limit)
+                .whenComplete((summary, err) -> plugin.sync(() -> {
+                    sender.sendMessage("§6=== §e" + ref.name() + " §6metrics ===");
+                    plugin.getFightManager().fightOf(ref.uuid()).ifPresent(f -> sender.sendMessage("§eLive: "
+                            + FightManager.formatMetrics(plugin.getMetricsTracker().snapshot(f).get(ref.uuid()))));
+                    if (err != null) {
+                        sender.sendMessage("§cDatabase error.");
+                    } else if (summary.isEmpty()) {
+                        sender.sendMessage("§7No " + gm + " fights recorded yet.");
+                    } else {
+                        Storage.MetricsSummary m = summary.get();
+                        sender.sendMessage(String.format("§eLast %d %s fights §7(won §f%d§7):", m.fights(), gm, m.wins()));
+                        sender.sendMessage(String.format("§7Acc §f%s §7| Dmg/fight §f%.1f§7/§f%.1f §7| CPS §f%.1f §8(peak %d)",
+                                m.accuracy() < 0 ? "-" : String.format("%.0f%%", m.accuracy()),
+                                m.avgDamageDealt(), m.avgDamageTaken(), m.avgCps(), m.peakCps()));
+                        sender.sendMessage(String.format("§7Combo best §f%d§7, avg §f%.1f§7, median §f%.1f §7| Fight skill §f%.1f",
+                                m.bestCombo(), m.avgCombo(), m.avgMedianCombo(), m.avgFightSkill()));
+                    }
+                })));
+    }
+
     private void fight(CommandSender sender, String[] args) {
         if (args.length < 3) { sender.sendMessage("§cUsage: /tieradmin fight <player1> <player2> [mode]"); return; }
         Player a = Bukkit.getPlayerExact(args[1]);
@@ -121,7 +152,7 @@ public class TierAdminCommand implements TabExecutor {
         Gamemode gm = args.length >= 4 ? Gamemode.parse(args[3]).orElse(null) : Gamemode.SWORD;
         if (gm == null) { sender.sendMessage("§cModes: " + Arrays.toString(Gamemode.values())); return; }
 
-        if (!plugin.getFightTracker().startFight(a.getUniqueId(), b.getUniqueId(), gm)) {
+        if (!plugin.getFightManager().startFight(a.getUniqueId(), b.getUniqueId(), gm)) {
             sender.sendMessage("§cCannot start: same player or one of them is already fighting.");
             return;
         }
@@ -189,6 +220,8 @@ public class TierAdminCommand implements TabExecutor {
             case "reset" -> args.length == 2 ? filter(players, args[1])
                           : args.length == 3 ? filter(modes, args[2]) : List.of();
             case "info" -> args.length == 2 ? filter(players, args[1]) : List.of();
+            case "metrics" -> args.length == 2 ? filter(players, args[1])
+                            : args.length == 3 ? filter(modes, args[2]) : List.of();
             case "fight" -> args.length <= 3 ? filter(players, args[args.length - 1])
                           : args.length == 4 ? filter(modes, args[3]) : List.of();
             default -> List.of();

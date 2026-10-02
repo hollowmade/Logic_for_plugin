@@ -14,6 +14,9 @@ import ru.logic.tierplugin.core.Tier;
 
 import java.io.File;
 import java.nio.file.Path;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.Statement;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -48,7 +51,7 @@ class StorageTest {
 
     private static MatchInput sword() {
         return new MatchInput(Gamemode.SWORD, 1, 0,
-                new FightMetrics(20, 10, 120, 60, 6), new FightMetrics(10, 20, 60, 120, 3), 30_000);
+                FightMetrics.basic(20, 10, 120, 60, 6), FightMetrics.basic(10, 20, 60, 120, 3), 30_000);
     }
 
     @Test
@@ -115,6 +118,58 @@ class StorageTest {
         s.touchPlayer(a, "New").join();
         assertTrue(s.findPlayer("Old").join().isEmpty());
         assertEquals("New", s.findPlayer("new").join().orElseThrow().name());
+    }
+
+    @Test
+    void metricsAreStoredAndSummarised() throws Exception {
+        Storage s = open(noon);
+        FightMetrics strong = new FightMetrics(20, 15, 22.5, 8.0, 5, 3.5, 3.0, 2, 8.0, 12);
+        FightMetrics weak = new FightMetrics(10, 2, 8.0, 22.5, 1, 0, 0, 0, 4.0, 6);
+        s.recordMatch(a, b, new MatchInput(Gamemode.SWORD, 1, 0, strong, weak, 30_000), rating).join();
+        s.recordMatch(b, a, new MatchInput(Gamemode.SWORD, 1, 0, weak, strong, 30_000), rating).join();
+
+        Storage reopened = open(noon);
+        Storage.MetricsSummary m = reopened.metricsSummary(a, Gamemode.SWORD, 20).join().orElseThrow();
+        assertEquals(2, m.fights());
+        assertEquals(1, m.wins());
+        assertEquals(75.0, m.accuracy(), 1e-9);
+        assertEquals(22.5, m.avgDamageDealt(), 1e-9);
+        assertEquals(5, m.bestCombo());
+        assertEquals(3.0, m.avgMedianCombo(), 1e-9);
+        assertEquals(12, m.peakCps());
+
+        assertTrue(reopened.metricsSummary(a, Gamemode.CART, 20).join().isEmpty());
+    }
+
+    @Test
+    void summaryUsesOnlyTheMostRecentFights() throws Exception {
+        Storage s = open(noon);
+        FightMetrics old = FightMetrics.basic(0, 10, 0, 0, 0);
+        FightMetrics recent = FightMetrics.basic(10, 0, 20, 0, 4);
+        for (int i = 0; i < 3; i++) {
+            Storage day = open(Clock.offset(noon, Duration.ofDays(i)));
+            day.recordMatch(a, b, new MatchInput(Gamemode.SWORD, 1, 0, i == 0 ? old : recent,
+                    FightMetrics.EMPTY, 1000), rating).join();
+        }
+        Storage.MetricsSummary m = open(noon).metricsSummary(a, Gamemode.SWORD, 2).join().orElseThrow();
+        assertEquals(2, m.fights());
+        assertEquals(100.0, m.accuracy(), 1e-9, "the oldest 0 % fight is outside the window");
+    }
+
+    @Test
+    void stageOneMetricsTableIsMigrated() throws Exception {
+        File file = new File(dir.toFile(), "test.db");
+        try (Connection c = DriverManager.getConnection("jdbc:sqlite:" + file.getAbsolutePath());
+             Statement st = c.createStatement()) {
+            st.executeUpdate("""
+                CREATE TABLE metrics (match_id BIGINT NOT NULL, uuid VARCHAR(36) NOT NULL,
+                    hits INT NOT NULL, misses INT NOT NULL, damage_dealt INT NOT NULL,
+                    damage_taken INT NOT NULL, max_combo INT NOT NULL, fight_skill DOUBLE NOT NULL,
+                    PRIMARY KEY (match_id, uuid))""");
+        }
+        Storage s = open(noon);
+        s.recordMatch(a, b, sword(), rating).join();
+        assertEquals(1, s.metricsSummary(a, Gamemode.SWORD, 20).join().orElseThrow().fights());
     }
 
     @Test

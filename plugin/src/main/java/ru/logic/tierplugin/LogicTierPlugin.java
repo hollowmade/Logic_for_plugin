@@ -1,15 +1,17 @@
 package ru.logic.tierplugin;
 
 import org.bukkit.plugin.java.JavaPlugin;
-import ru.logic.tierplugin.adapter.BukkitEventAdapter;
 import ru.logic.tierplugin.adapter.ConfigLoader;
+import ru.logic.tierplugin.adapter.FightListener;
+import ru.logic.tierplugin.adapter.MetricsListener;
 import ru.logic.tierplugin.commands.DuelCommand;
 import ru.logic.tierplugin.commands.TierAdminCommand;
 import ru.logic.tierplugin.commands.TierCommand;
 import ru.logic.tierplugin.core.RatingService;
+import ru.logic.tierplugin.fight.FightManager;
 import ru.logic.tierplugin.storage.Database;
 import ru.logic.tierplugin.storage.Storage;
-import ru.logic.tierplugin.tracker.FightTracker;
+import ru.logic.tierplugin.tracker.MetricsTracker;
 
 import java.sql.SQLException;
 import java.time.Clock;
@@ -18,14 +20,16 @@ import java.util.logging.Level;
 
 /**
  * Main plugin class for LogicTierPlugin.
- * Initialises all subsystems: storage, rating core, tracker, commands, events.
+ * Initialises all subsystems: rating core, storage, fights, metrics tracker, commands, events.
  */
 public final class LogicTierPlugin extends JavaPlugin {
 
     private Database database;
     private Storage storage;
     private RatingService ratingService;
-    private FightTracker fightTracker;
+    private FightManager fightManager;
+    private MetricsTracker metricsTracker;
+    private int metricsSummaryFights;
 
     @Override
     public void onEnable() {
@@ -44,8 +48,10 @@ public final class LogicTierPlugin extends JavaPlugin {
         }
         storage = new Storage(database, Clock.systemDefaultZone());
 
-        // 3. Tracker
-        fightTracker = new FightTracker(this);
+        // 3. Fights and the metrics tracker attached to them
+        fightManager = new FightManager(this);
+        metricsTracker = new MetricsTracker(fightManager, ConfigLoader.tracker(getConfig()));
+        metricsSummaryFights = getConfig().getInt("metrics.summary_fights", 20);
 
         // 4. Commands
         Objects.requireNonNull(getCommand("tier")).setExecutor(new TierCommand(this));
@@ -55,7 +61,8 @@ public final class LogicTierPlugin extends JavaPlugin {
         Objects.requireNonNull(getCommand("duel")).setExecutor(new DuelCommand(this));
 
         // 5. Events (players already online after /reload are registered too)
-        getServer().getPluginManager().registerEvents(new BukkitEventAdapter(this), this);
+        getServer().getPluginManager().registerEvents(new FightListener(this), this);
+        getServer().getPluginManager().registerEvents(new MetricsListener(metricsTracker), this);
         getServer().getOnlinePlayers().forEach(p -> storage.touchPlayer(p.getUniqueId(), p.getName()));
 
         getLogger().info("Enabled successfully.");
@@ -63,7 +70,7 @@ public final class LogicTierPlugin extends JavaPlugin {
 
     @Override
     public void onDisable() {
-        if (fightTracker != null) fightTracker.shutdown();
+        if (fightManager != null) fightManager.shutdown();
         if (database != null) database.close(); // drains queued writes first
         getLogger().info("Disabled.");
     }
@@ -75,5 +82,8 @@ public final class LogicTierPlugin extends JavaPlugin {
 
     public Storage getStorage() { return storage; }
     public RatingService getRatingService() { return ratingService; }
-    public FightTracker getFightTracker() { return fightTracker; }
+    public FightManager getFightManager() { return fightManager; }
+    public MetricsTracker getMetricsTracker() { return metricsTracker; }
+    /** How many recent fights {@code /tieradmin metrics} aggregates. */
+    public int getMetricsSummaryFights() { return metricsSummaryFights; }
 }

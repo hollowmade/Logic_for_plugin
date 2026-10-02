@@ -177,20 +177,43 @@ public class Database {
                     CREATE TABLE IF NOT EXISTS metrics (
                         match_id     BIGINT NOT NULL,
                         uuid         VARCHAR(36) NOT NULL,
+                        swings       INT NOT NULL DEFAULT 0,
                         hits         INT NOT NULL,
                         misses       INT NOT NULL,
-                        damage_dealt INT NOT NULL,
-                        damage_taken INT NOT NULL,
+                        damage_dealt DOUBLE NOT NULL,
+                        damage_taken DOUBLE NOT NULL,
                         max_combo    INT NOT NULL,
+                        avg_combo    DOUBLE NOT NULL DEFAULT 0,
+                        median_combo DOUBLE NOT NULL DEFAULT 0,
+                        combo_count  INT NOT NULL DEFAULT 0,
+                        avg_cps      DOUBLE NOT NULL DEFAULT 0,
+                        max_cps      INT NOT NULL DEFAULT 0,
                         fight_skill  DOUBLE NOT NULL,
                         PRIMARY KEY (match_id, uuid)
                     )""");
+
+                // Stage-1 metrics tables lack the stage-3 columns
+                ensureColumn(conn, st, "metrics", "swings", "INT NOT NULL DEFAULT 0");
+                ensureColumn(conn, st, "metrics", "avg_combo", "DOUBLE NOT NULL DEFAULT 0");
+                ensureColumn(conn, st, "metrics", "median_combo", "DOUBLE NOT NULL DEFAULT 0");
+                ensureColumn(conn, st, "metrics", "combo_count", "INT NOT NULL DEFAULT 0");
+                ensureColumn(conn, st, "metrics", "avg_cps", "DOUBLE NOT NULL DEFAULT 0");
+                ensureColumn(conn, st, "metrics", "max_cps", "INT NOT NULL DEFAULT 0");
 
                 index(st, "idx_players_name", "players", "name");
                 index(st, "idx_matches_pair", "matches", "pair_key, gamemode, played_at");
                 index(st, "idx_matches_winner", "matches", "winner_uuid");
                 index(st, "idx_matches_loser", "matches", "loser_uuid");
             }
+        }
+
+        private void ensureColumn(Connection conn, Statement st, String table, String column, String definition)
+                throws SQLException {
+            try (ResultSet rs = conn.getMetaData().getColumns(conn.getCatalog(), null, table, column)) {
+                if (rs.next()) return;
+            }
+            st.executeUpdate("ALTER TABLE " + table + " ADD COLUMN " + column + " " + definition);
+            log.info("Added column " + table + "." + column + ".");
         }
 
         private void index(Statement st, String name, String table, String columns) throws SQLException {
