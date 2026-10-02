@@ -6,9 +6,14 @@ import java.util.Optional;
  * Supported PvP gamemodes, each with its own metric weights and Elo ladder.
  */
 public enum Gamemode {
-    CRYSTAL,
-    SWORD,
-    CART;
+    SWORD;
+
+    // Disabled until their metrics are done (crystal/anchor timing, cart placement).
+    // The per-mode ladder, weights and storage already support them: to bring a mode
+    // back, uncomment it here, in CoreConfig.defaults(), in config.yml skill_weights,
+    // and the multi-mode tests in RatingCoreTest / StorageTest.
+    // CRYSTAL,
+    // CART,
 
     /** Returns the config key prefix for this gamemode's skill weights. */
     public String configKey() {

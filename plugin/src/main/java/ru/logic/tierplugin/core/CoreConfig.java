@@ -91,9 +91,9 @@ public record CoreConfig(
         tiers.put(Tier.HT1, new TierThreshold(2000, 90, 0.80, 160));
 
         Map<Gamemode, Weights> weights = new EnumMap<>(Gamemode.class);
-        weights.put(Gamemode.CRYSTAL, new Weights(0.40, 0.35, 0.25));
+        // weights.put(Gamemode.CRYSTAL, new Weights(0.40, 0.35, 0.25)); // disabled, see Gamemode
         weights.put(Gamemode.SWORD, new Weights(0.35, 0.35, 0.30));
-        weights.put(Gamemode.CART, new Weights(0.40, 0.30, 0.30));
+        // weights.put(Gamemode.CART, new Weights(0.40, 0.30, 0.30));    // disabled, see Gamemode
 
         return new CoreConfig(
                 tiers,

@@ -87,23 +87,24 @@ class StorageTest {
         assertEquals(1, tomorrow.recordMatch(a, b, sword(), rating).join().matchNumberToday());
     }
 
-    @Test
-    void counterIsPerGamemode() throws Exception {
-        Storage s = open(noon);
-        s.recordMatch(a, b, sword(), rating).join();
-        MatchInput crystal = new MatchInput(Gamemode.CRYSTAL, 1, 0, FightMetrics.EMPTY, FightMetrics.EMPTY, 1000);
-        assertEquals(1, s.recordMatch(a, b, crystal, rating).join().matchNumberToday());
-        assertEquals(2, s.loadRatings(a).join().size());
-    }
+    // Needs a second gamemode; restore together with CRYSTAL/CART in Gamemode.
+    // @Test
+    // void counterIsPerGamemode() throws Exception {
+    //     Storage s = open(noon);
+    //     s.recordMatch(a, b, sword(), rating).join();
+    //     MatchInput crystal = new MatchInput(Gamemode.CRYSTAL, 1, 0, FightMetrics.EMPTY, FightMetrics.EMPTY, 1000);
+    //     assertEquals(1, s.recordMatch(a, b, crystal, rating).join().matchNumberToday());
+    //     assertEquals(2, s.loadRatings(a).join().size());
+    // }
 
     @Test
     void saveAndDeleteRatings() throws Exception {
         Storage s = open(noon);
-        ModeRating r = rating.newRating(a, Gamemode.CART);
+        ModeRating r = rating.newRating(a, Gamemode.SWORD);
         r.setTier(Tier.HT2);
         r.setProvisional(false);
         s.saveRating(r).join();
-        ModeRating loaded = s.loadRatings(a).join().get(Gamemode.CART);
+        ModeRating loaded = s.loadRatings(a).join().get(Gamemode.SWORD);
         assertEquals(Tier.HT2, loaded.getTier());
         assertFalse(loaded.isProvisional());
 
@@ -138,7 +139,7 @@ class StorageTest {
         assertEquals(3.0, m.avgMedianCombo(), 1e-9);
         assertEquals(12, m.peakCps());
 
-        assertTrue(reopened.metricsSummary(a, Gamemode.CART, 20).join().isEmpty());
+        assertTrue(reopened.metricsSummary(UUID.randomUUID(), Gamemode.SWORD, 20).join().isEmpty());
     }
 
     @Test
