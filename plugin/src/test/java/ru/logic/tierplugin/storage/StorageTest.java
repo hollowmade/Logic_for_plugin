@@ -4,6 +4,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import ru.logic.tierplugin.core.CoreConfig;
+import ru.logic.tierplugin.core.EndReason;
 import ru.logic.tierplugin.core.FightMetrics;
 import ru.logic.tierplugin.core.Gamemode;
 import ru.logic.tierplugin.core.MatchInput;
@@ -171,6 +172,58 @@ class StorageTest {
         Storage s = open(noon);
         s.recordMatch(a, b, sword(), rating).join();
         assertEquals(1, s.metricsSummary(a, Gamemode.SWORD, 20).join().orElseThrow().fights());
+    }
+
+    private static MatchInput leave() {
+        return new MatchInput(Gamemode.SWORD, 0, 0,
+                FightMetrics.basic(2, 1, 8, 0, 2), FightMetrics.EMPTY, 20_000, EndReason.LEAVE);
+    }
+
+    @Test
+    void leavesAreCountedWithinTheWindow() throws Exception {
+        UUID c = UUID.randomUUID();
+        assertEquals(1, open(noon).recordMatch(a, b, leave(), rating).join().leaveNumber());
+        // A different opponent: the count is per leaver, not per pair
+        assertEquals(2, open(Clock.offset(noon, Duration.ofHours(2))).recordMatch(c, b, leave(), rating).join().leaveNumber());
+
+        Storage s = open(Clock.offset(noon, Duration.ofHours(3)));
+        assertEquals(2, s.leaveTimes(b, noon.millis() - 1).join().size());
+        assertTrue(s.leaveTimes(a, 0).join().isEmpty(), "the winner has no leaves");
+
+        // 25 h after the first leave only the second one is inside the 24 h window
+        MatchOutcome later = open(Clock.offset(noon, Duration.ofHours(25))).recordMatch(a, b, leave(), rating).join();
+        assertEquals(2, later.leaveNumber());
+    }
+
+    @Test
+    void summaryIgnoresLeaves() throws Exception {
+        Storage s = open(noon);
+        s.recordMatch(a, b, leave(), rating).join();
+        assertTrue(s.metricsSummary(a, Gamemode.SWORD, 20).join().isEmpty());
+        s.recordMatch(a, b, sword(), rating).join();
+        assertEquals(1, s.metricsSummary(a, Gamemode.SWORD, 20).join().orElseThrow().fights());
+    }
+
+    @Test
+    void matchesTableWithoutEndReasonIsMigrated() throws Exception {
+        File file = new File(dir.toFile(), "test.db");
+        try (Connection c = DriverManager.getConnection("jdbc:sqlite:" + file.getAbsolutePath());
+             Statement st = c.createStatement()) {
+            st.executeUpdate("""
+                CREATE TABLE matches (id INTEGER PRIMARY KEY AUTOINCREMENT, gamemode VARCHAR(16) NOT NULL,
+                    pair_key VARCHAR(73) NOT NULL, winner_uuid VARCHAR(36) NOT NULL, loser_uuid VARCHAR(36) NOT NULL,
+                    winner_score INT NOT NULL, loser_score INT NOT NULL, duration_ms BIGINT NOT NULL,
+                    match_number INT NOT NULL, weight DOUBLE NOT NULL,
+                    winner_elo_before DOUBLE NOT NULL, winner_elo_after DOUBLE NOT NULL,
+                    loser_elo_before DOUBLE NOT NULL, loser_elo_after DOUBLE NOT NULL, played_at BIGINT NOT NULL)""");
+            st.executeUpdate("INSERT INTO matches (gamemode, pair_key, winner_uuid, loser_uuid, winner_score, loser_score,"
+                    + " duration_ms, match_number, weight, winner_elo_before, winner_elo_after, loser_elo_before,"
+                    + " loser_elo_after, played_at) VALUES ('SWORD', 'x', '" + a + "', '" + b + "', 1, 0, 1000, 1, 1,"
+                    + " 1000, 1020, 1000, 980, " + noon.millis() + ")");
+        }
+        Storage s = open(noon);
+        assertTrue(s.leaveTimes(b, 0).join().isEmpty(), "old matches become KILL");
+        assertEquals(1, s.recordMatch(a, b, leave(), rating).join().leaveNumber());
     }
 
     @Test

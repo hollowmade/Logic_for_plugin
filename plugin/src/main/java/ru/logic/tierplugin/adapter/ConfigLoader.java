@@ -5,6 +5,7 @@ import org.bukkit.configuration.file.FileConfiguration;
 import ru.logic.tierplugin.core.CoreConfig;
 import ru.logic.tierplugin.core.Gamemode;
 import ru.logic.tierplugin.core.Tier;
+import ru.logic.tierplugin.fight.FightSettings;
 import ru.logic.tierplugin.storage.DatabaseSettings;
 import ru.logic.tierplugin.storage.SqlDialect;
 import ru.logic.tierplugin.tracker.TrackerSettings;
@@ -80,12 +81,28 @@ public final class ConfigLoader {
                 cfg.getInt("tier_rules.placement_fights", dr.placementFights()),
                 cfg.getDouble("tier_rules.demotion_buffer_elo", dr.demotionBufferElo()));
 
+        // ── Leaving a fight ────────────────────────────────────
+        CoreConfig.Leave dl = d.leave();
+        List<Double> penalties = cfg.getDoubleList("leave.penalty_multipliers");
+        CoreConfig.Leave leave = new CoreConfig.Leave(
+                penalties.isEmpty() ? dl.penaltyMultipliers()
+                        : penalties.stream().mapToDouble(Double::doubleValue).toArray(),
+                cfg.getLong("leave.real_fight_seconds", dl.realFightMillis() / 1000) * 1000,
+                cfg.getInt("leave.window_hours", dl.windowHours()),
+                cfg.getInt("leave.cooldown_after_leaves", dl.cooldownAfterLeaves()),
+                cfg.getInt("leave.cooldown_minutes", dl.cooldownMinutes()));
+
         return new CoreConfig(
                 tiers,
                 elo,
                 skill,
                 rules,
-                cfg.getInt("match_rating.score_diff_cap", d.scoreDiffCap()));
+                cfg.getInt("match_rating.score_diff_cap", d.scoreDiffCap()),
+                leave);
+    }
+
+    public static FightSettings fight(FileConfiguration cfg) {
+        return new FightSettings(cfg.getInt("leave.reconnect_grace_seconds", FightSettings.DEFAULTS.reconnectGraceSeconds()));
     }
 
     public static TrackerSettings tracker(FileConfiguration cfg) {

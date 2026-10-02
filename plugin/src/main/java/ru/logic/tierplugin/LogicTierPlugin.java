@@ -49,7 +49,7 @@ public final class LogicTierPlugin extends JavaPlugin {
         storage = new Storage(database, Clock.systemDefaultZone());
 
         // 3. Fights and the metrics tracker attached to them
-        fightManager = new FightManager(this);
+        fightManager = new FightManager(this, ConfigLoader.fight(getConfig()));
         metricsTracker = new MetricsTracker(fightManager, ConfigLoader.tracker(getConfig()));
         metricsSummaryFights = getConfig().getInt("metrics.summary_fights", 20);
 

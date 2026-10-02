@@ -1,5 +1,6 @@
 package ru.logic.tierplugin.storage;
 
+import ru.logic.tierplugin.core.EndReason;
 import ru.logic.tierplugin.core.FightMetrics;
 import ru.logic.tierplugin.core.Gamemode;
 import ru.logic.tierplugin.core.MatchInput;
@@ -15,6 +16,7 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.Clock;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
@@ -51,7 +53,8 @@ public class Storage {
     private static final List<String> MATCH_COLUMNS = List.of(
             "gamemode", "pair_key", "winner_uuid", "loser_uuid", "winner_score", "loser_score",
             "duration_ms", "match_number", "weight",
-            "winner_elo_before", "winner_elo_after", "loser_elo_before", "loser_elo_after", "played_at");
+            "winner_elo_before", "winner_elo_after", "loser_elo_before", "loser_elo_after", "played_at",
+            "end_reason");
     private static final List<String> METRIC_COLUMNS = List.of(
             "match_id", "uuid", "swings", "hits", "misses", "damage_dealt", "damage_taken",
             "max_combo", "avg_combo", "median_combo", "combo_count", "avg_cps", "max_cps", "fight_skill");
@@ -133,7 +136,8 @@ public class Storage {
 
     /**
      * Rates and records a finished match in a single transaction:
-     * load both ratings → count the pair's matches today → apply the rating core
+     * load both ratings → count the pair's matches today (and the loser's recent leaves,
+     * for a LEAVE) → apply the rating core
      * → store match, metrics and the new ratings.
      */
     public CompletableFuture<MatchOutcome> recordMatch(UUID winnerId, UUID loserId, MatchInput in,
@@ -146,8 +150,11 @@ public class Storage {
 
             String pair = pairKey(winnerId, loserId);
             int matchNumber = countPairMatchesSince(conn, pair, in.gamemode(), startOfToday()) + 1;
+            int leaveNumber = in.endReason() == EndReason.LEAVE
+                    ? leaveTimes(conn, loserId, clock.millis() - rating.getConfig().leave().windowMillis()).size() + 1
+                    : 0;
 
-            MatchOutcome out = rating.process(winner, loser, in, matchNumber);
+            MatchOutcome out = rating.process(winner, loser, in, matchNumber, leaveNumber);
 
             long matchId = insertMatch(conn, pair, winnerId, loserId, in, out);
             insertMetrics(conn, matchId, winnerId, in.winnerMetrics(), out.winner().fightSkill());
@@ -158,7 +165,15 @@ public class Storage {
         });
     }
 
-    /** Aggregates the player's last {@code limit} fights in {@code gamemode}; empty if none. */
+    /**
+     * Times of the player's leaves since {@code since} (epoch ms), newest first.
+     * Feeds the leave cooldown and admin info.
+     */
+    public CompletableFuture<List<Long>> leaveTimes(UUID uuid, long since) {
+        return db.submit(conn -> leaveTimes(conn, uuid, since));
+    }
+
+    /** Aggregates the player's last {@code limit} fights in {@code gamemode} that ended by a kill; empty if none. */
     public CompletableFuture<Optional<MetricsSummary>> metricsSummary(UUID uuid, Gamemode gamemode, int limit) {
         return db.submit(conn -> {
             String sql = """
@@ -167,7 +182,7 @@ public class Storage {
                            AVG(avg_combo), AVG(median_combo), AVG(avg_cps), MAX(max_cps), AVG(fight_skill)
                     FROM (SELECT m.*, CASE WHEN x.winner_uuid = m.uuid THEN 1 ELSE 0 END AS won
                           FROM metrics m JOIN matches x ON x.id = m.match_id
-                          WHERE m.uuid = ? AND x.gamemode = ?
+                          WHERE m.uuid = ? AND x.gamemode = ? AND x.end_reason = 'KILL'
                           ORDER BY x.played_at DESC, x.id DESC
                           LIMIT ?) recent""";
             try (PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -270,6 +285,20 @@ public class Storage {
         return r;
     }
 
+    private List<Long> leaveTimes(Connection conn, UUID uuid, long since) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(
+                "SELECT played_at FROM matches WHERE loser_uuid = ? AND end_reason = 'LEAVE' AND played_at >= ?"
+                + " ORDER BY played_at DESC")) {
+            ps.setString(1, uuid.toString());
+            ps.setLong(2, since);
+            try (ResultSet rs = ps.executeQuery()) {
+                List<Long> out = new ArrayList<>();
+                while (rs.next()) out.add(rs.getLong(1));
+                return out;
+            }
+        }
+    }
+
     private int countPairMatchesSince(Connection conn, String pair, Gamemode gm, long since) throws SQLException {
         try (PreparedStatement ps = conn.prepareStatement(
                 "SELECT COUNT(*) FROM matches WHERE pair_key = ? AND gamemode = ? AND played_at >= ?")) {
@@ -300,6 +329,7 @@ public class Storage {
             ps.setDouble(12, out.loser().eloBefore());
             ps.setDouble(13, out.loser().eloAfter());
             ps.setLong(14, clock.millis());
+            ps.setString(15, in.endReason().name());
             ps.executeUpdate();
             try (ResultSet keys = ps.getGeneratedKeys()) {
                 if (!keys.next()) throw new SQLException("No id returned for inserted match");

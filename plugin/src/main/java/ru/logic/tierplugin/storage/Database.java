@@ -170,8 +170,12 @@ public class Database {
                         winner_elo_after  DOUBLE NOT NULL,
                         loser_elo_before  DOUBLE NOT NULL,
                         loser_elo_after   DOUBLE NOT NULL,
-                        played_at         BIGINT NOT NULL
+                        played_at         BIGINT NOT NULL,
+                        end_reason        VARCHAR(8) NOT NULL DEFAULT 'KILL'
                     )""".formatted(dialect.autoIdColumn()));
+
+                // Stage-1/3 matches tables lack end_reason
+                ensureColumn(conn, st, "matches", "end_reason", "VARCHAR(8) NOT NULL DEFAULT 'KILL'");
 
                 st.executeUpdate("""
                     CREATE TABLE IF NOT EXISTS metrics (

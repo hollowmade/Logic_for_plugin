@@ -120,6 +120,15 @@ metrics:
   combo_min_length: 2      # shortest streak counted as a combo (for avg / median)
   summary_fights: 20       # /tieradmin metrics aggregates this many recent fights
 
+# ── Leaving a fight ──────────────────────────────────────────────────────────
+leave:
+  reconnect_grace_seconds: 30   # a disconnected player can rejoin and continue within this time
+  real_fight_seconds: 15        # the winner gets Elo for a forfeit only if a hit landed or the fight lasted this long
+  window_hours: 24              # leaves are counted over this period
+  penalty_multipliers: [1.0, 1.5, 2.0]  # leaver's Elo loss x this for the 1st, 2nd, 3rd+ leave in the window
+  cooldown_after_leaves: 3      # after this many leaves in the window...
+  cooldown_minutes: 10          # ...the player cannot start fights for this long (0 leaves = off)
+
 # ── Match quality cap ────────────────────────────────────────────────────────
 match_rating:
   score_diff_cap: 15   # max kills difference used in quality calculation

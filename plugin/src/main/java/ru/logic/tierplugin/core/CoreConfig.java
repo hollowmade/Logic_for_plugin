@@ -1,6 +1,7 @@
 package ru.logic.tierplugin.core;
 
 import java.util.EnumMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -14,7 +15,8 @@ public record CoreConfig(
         Elo elo,
         Skill skill,
         TierRules tierRules,
-        int scoreDiffCap
+        int scoreDiffCap,
+        Leave leave
 ) {
 
     public CoreConfig {
@@ -76,6 +78,49 @@ public record CoreConfig(
      */
     public record TierRules(int placementFights, double demotionBufferElo) {}
 
+    /**
+     * Rules for a player who leaves mid-fight.
+     *
+     * @param penaltyMultipliers  Elo loss multiplier for the 1st, 2nd, 3rd... leave in the window;
+     *                            the last value applies to all further leaves
+     * @param realFightMillis     the winner is credited for a leave only if a hit landed or
+     *                            the fight lasted at least this long
+     * @param windowHours         leaves are counted over this many hours
+     * @param cooldownAfterLeaves this many leaves in the window block starting new fights...
+     * @param cooldownMinutes     ...for this long after the latest leave
+     */
+    public record Leave(double[] penaltyMultipliers, long realFightMillis, int windowHours,
+                        int cooldownAfterLeaves, int cooldownMinutes) {
+
+        public Leave {
+            if (penaltyMultipliers.length == 0) {
+                throw new IllegalArgumentException("leave.penalty_multipliers must not be empty");
+            }
+            penaltyMultipliers = penaltyMultipliers.clone();
+        }
+
+        /** @param leaveNumber 1-based count of leaves in the window, this one included */
+        public double penaltyFor(int leaveNumber) {
+            int idx = Math.max(1, Math.min(leaveNumber, penaltyMultipliers.length)) - 1;
+            return penaltyMultipliers[idx];
+        }
+
+        public long windowMillis() {
+            return windowHours * 3_600_000L;
+        }
+
+        /**
+         * @param leaveTimes times of the player's leaves within the window, any order
+         * @return until when the player may not start fights, or 0 if not blocked
+         */
+        public long blockedUntil(List<Long> leaveTimes, long now) {
+            if (cooldownAfterLeaves <= 0 || leaveTimes.size() < cooldownAfterLeaves) return 0;
+            long latest = leaveTimes.stream().mapToLong(Long::longValue).max().orElse(0);
+            long until = latest + cooldownMinutes * 60_000L;
+            return until > now ? until : 0;
+        }
+    }
+
     /** Defaults matching the shipped config.yml; handy for tests. */
     public static CoreConfig defaults() {
         Map<Tier, TierThreshold> tiers = new EnumMap<>(Tier.class);
@@ -100,6 +145,7 @@ public record CoreConfig(
                 new Elo(1000, 350, 0.06, 60, 0.97, new double[]{1.00, 0.70, 0.50, 0.30, 0.10}, 20),
                 new Skill(200, 20, 0.2, weights),
                 new TierRules(10, 30),
-                15);
+                15,
+                new Leave(new double[]{1.0, 1.5, 2.0}, 15_000, 24, 3, 10));
     }
 }

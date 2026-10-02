@@ -13,7 +13,8 @@ import ru.logic.tierplugin.fight.FightManager;
 import java.util.UUID;
 
 /**
- * Fight lifecycle events: a kill ends the fight, leaving forfeits it.
+ * Fight lifecycle events: a kill ends the fight; a disconnect pauses it and
+ * forfeits it if the player does not return in time (see {@link FightManager}).
  * Also keeps the players table current on join.
  */
 public class FightListener implements Listener {
@@ -26,11 +27,12 @@ public class FightListener implements Listener {
         this.fights = plugin.getFightManager();
     }
 
-    /** Keeps the players table current so offline lookups by name work. */
+    /** Keeps the players table current and resumes a fight paused by this player's disconnect. */
     @EventHandler(priority = EventPriority.MONITOR)
     public void onJoin(PlayerJoinEvent event) {
         Player p = event.getPlayer();
         plugin.getStorage().touchPlayer(p.getUniqueId(), p.getName());
+        fights.playerJoin(p);
     }
 
     /**
@@ -53,13 +55,13 @@ public class FightListener implements Listener {
         });
     }
 
-    /** A player leaving mid-fight forfeits: the opponent is awarded the win. */
+    /** A player leaving mid-fight gets the reconnect grace period, then forfeits. */
     @EventHandler(priority = EventPriority.MONITOR)
     public void onQuit(PlayerQuitEvent event) {
         Player player = event.getPlayer();
-        fights.fightOf(player.getUniqueId()).ifPresent(fight -> {
-            fights.endFight(fight.opponentOf(player.getUniqueId()));
-            plugin.getLogger().info(player.getName() + " disconnected mid-fight. Win awarded to opponent.");
-        });
+        if (fights.isInFight(player.getUniqueId())) {
+            plugin.getLogger().info(player.getName() + " disconnected mid-fight; waiting for reconnect.");
+            fights.playerQuit(player.getUniqueId());
+        }
     }
 }

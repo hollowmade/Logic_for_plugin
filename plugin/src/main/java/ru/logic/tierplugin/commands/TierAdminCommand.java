@@ -108,11 +108,17 @@ public class TierAdminCommand implements TabExecutor {
 
     private void info(CommandSender sender, String[] args) {
         if (args.length < 2) { sender.sendMessage("§cUsage: /tieradmin info <player>"); return; }
+        var leave = plugin.getRatingService().getConfig().leave();
         withPlayer(sender, args[1], ref -> plugin.getStorage().loadRatings(ref.uuid())
-                .whenComplete((ratings, err) -> plugin.sync(() -> {
+                .thenCombine(plugin.getStorage().leaveTimes(ref.uuid(), System.currentTimeMillis() - leave.windowMillis()),
+                        java.util.Map::entry)
+                .whenComplete((res, err) -> plugin.sync(() -> {
                     if (err != null) { sender.sendMessage("§cDatabase error."); return; }
                     sender.sendMessage("§7UUID: §f" + ref.uuid());
-                    TierCommand.show(sender, ref.name(), ratings);
+                    long blocked = leave.blockedUntil(res.getValue(), System.currentTimeMillis());
+                    sender.sendMessage("§7Leaves in " + leave.windowHours() + "h: §f" + res.getValue().size()
+                            + (blocked > 0 ? " §c(blocked from fights)" : ""));
+                    TierCommand.show(sender, ref.name(), res.getKey());
                 })));
     }
 
@@ -152,15 +158,34 @@ public class TierAdminCommand implements TabExecutor {
         Gamemode gm = args.length >= 4 ? Gamemode.parse(args[3]).orElse(null) : Gamemode.SWORD;
         if (gm == null) { sender.sendMessage("§cModes: " + Arrays.toString(Gamemode.values())); return; }
 
-        if (!plugin.getFightManager().startFight(a.getUniqueId(), b.getUniqueId(), gm)) {
-            sender.sendMessage("§cCannot start: same player or one of them is already fighting.");
-            return;
-        }
-        String msg = "§6Rated " + gm + " fight started: §f" + a.getName() + " §6vs §f" + b.getName()
-                + "§6. Kill your opponent to win.";
-        a.sendMessage(msg);
-        b.sendMessage(msg);
-        if (sender != a && sender != b) sender.sendMessage(msg);
+        // Players who left too many fights recently may not start new ones
+        var leave = plugin.getRatingService().getConfig().leave();
+        long now = System.currentTimeMillis();
+        long since = now - leave.windowMillis();
+        plugin.getStorage().leaveTimes(a.getUniqueId(), since)
+                .thenCombine(plugin.getStorage().leaveTimes(b.getUniqueId(), since),
+                        (la, lb) -> new long[]{leave.blockedUntil(la, now), leave.blockedUntil(lb, now)})
+                .whenComplete((blocked, err) -> plugin.sync(() -> {
+                    if (err != null) { sender.sendMessage("§cDatabase error."); return; }
+                    for (int i = 0; i < 2; i++) {
+                        if (blocked[i] > 0) {
+                            long min = Math.max(1, (blocked[i] - System.currentTimeMillis() + 59_999) / 60_000);
+                            sender.sendMessage("§c" + (i == 0 ? a : b).getName()
+                                    + " left too many fights and cannot fight for " + min + " more min.");
+                            return;
+                        }
+                    }
+                    if (!a.isOnline() || !b.isOnline()) { sender.sendMessage("§cBoth players must be online."); return; }
+                    if (!plugin.getFightManager().startFight(a.getUniqueId(), b.getUniqueId(), gm)) {
+                        sender.sendMessage("§cCannot start: same player or one of them is already fighting.");
+                        return;
+                    }
+                    String msg = "§6Rated " + gm + " fight started: §f" + a.getName() + " §6vs §f" + b.getName()
+                            + "§6. Kill your opponent to win.";
+                    a.sendMessage(msg);
+                    b.sendMessage(msg);
+                    if (sender != a && sender != b) sender.sendMessage(msg);
+                }));
     }
 
     private void simulate(CommandSender sender, String[] args) {

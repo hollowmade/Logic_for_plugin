@@ -95,7 +95,7 @@ public final class Simulator {
         CoreConfig noProtection = new CoreConfig(cfg.tiers(),
                 new CoreConfig.Elo(e.initialRating(), e.initialRd(), e.initialVolatility(), e.minRd(),
                         e.rdDecayPerMatch(), new double[]{1.0}, Integer.MAX_VALUE),
-                cfg.skill(), cfg.tierRules(), cfg.scoreDiffCap());
+                cfg.skill(), cfg.tierRules(), cfg.scoreDiffCap(), cfg.leave());
 
         ModeRating farmer = farmOneDay(cfg, matches);
         ModeRating unprotected = farmOneDay(noProtection, matches);
