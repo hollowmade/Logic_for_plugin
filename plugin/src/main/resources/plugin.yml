@@ -10,6 +10,10 @@ commands:
     description: Профиль игрока — тир, рейтинг и статистика
     usage: /tier [игрок]
     permission: tierplugin.tier
+  top:
+    description: Топ игроков по рейтингу и твоё место
+    usage: /top [режим] [страница]
+    permission: tierplugin.tier
   tieradmin:
     description: Управление тирами для администраторов
     usage: /tieradmin <fight|metrics|info|set|reset|simulate|stats|debug>

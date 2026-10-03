@@ -147,7 +147,7 @@ public class TierAdminCommand implements TabExecutor {
     private void info(CommandSender sender, String[] args) {
         if (args.length < 2) { usage(sender, "info " + Text.arg("игрок")); return; }
         var leave = plugin.getRatingService().getConfig().leave();
-        withPlayer(sender, args[1], ref -> plugin.getStorage().loadRatings(ref.uuid())
+        withPlayer(sender, args[1], ref -> plugin.getStorage().profile(ref.uuid())
                 .thenCombine(plugin.getStorage().leaveTimes(ref.uuid(), System.currentTimeMillis() - leave.windowMillis()),
                         Map::entry)
                 .whenComplete((res, err) -> plugin.sync(() -> {

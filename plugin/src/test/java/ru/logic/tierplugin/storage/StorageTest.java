@@ -227,6 +227,38 @@ class StorageTest {
     }
 
     @Test
+    void leaderboardAndPlacement() throws Exception {
+        UUID c = UUID.randomUUID();
+        Storage s = open(noon);
+        s.touchPlayer(a, "Alice").join();
+        s.touchPlayer(b, "Bob").join();
+        s.touchPlayer(c, "Carl").join();
+        s.recordMatch(a, b, sword(), rating).join();   // Alice up, Bob down
+        s.recordMatch(c, b, sword(), rating).join();   // Carl up, Bob down again
+
+        var top = s.leaderboard(Gamemode.SWORD, 0, 10).join();
+        assertEquals(3, top.size());
+        assertEquals("Bob", top.get(2).name(), "the double loser is last");
+        assertEquals(List.of(1, 2, 3), top.stream().map(Storage.LeaderRow::place).toList());
+        assertEquals(1, s.leaderboard(Gamemode.SWORD, 2, 10).join().size(), "offset pages the list");
+        assertEquals(3, s.rankedCount(Gamemode.SWORD).join());
+
+        var bob = s.profile(b).join().get(Gamemode.SWORD);
+        assertEquals(new Storage.Placement(3, 3), bob.placement());
+        assertEquals(2, bob.lifetime().orElseThrow().fights());
+        assertEquals(0, bob.lifetime().orElseThrow().wins());
+    }
+
+    @Test
+    void unratedPlayersAreNotRanked() throws Exception {
+        Storage s = open(noon);
+        ModeRating r = rating.newRating(a, Gamemode.SWORD);   // e.g. tier set by an admin, no fights
+        s.saveRating(r).join();
+        assertTrue(s.leaderboard(Gamemode.SWORD, 0, 10).join().isEmpty());
+        assertNull(s.profile(a).join().get(Gamemode.SWORD).placement());
+    }
+
+    @Test
     void sqlDialectsDiffer() {
         List<String> cols = List.of("uuid", "gamemode", "elo");
         List<String> keys = List.of("uuid", "gamemode");

@@ -46,6 +46,21 @@ public class Storage {
                                  int bestCombo, double avgCombo, double avgMedianCombo,
                                  double avgCps, int peakCps, double avgFightSkill) {}
 
+    /** One row of the leaderboard. */
+    public record LeaderRow(int place, UUID uuid, String name, double elo, Tier tier, boolean provisional,
+                            int wins, int losses) {}
+
+    /** A player's place among everyone ranked in a gamemode. */
+    public record Placement(int place, int total) {}
+
+    /**
+     * Everything a profile shows for one gamemode.
+     *
+     * @param placement null if the player has no rated fights yet
+     * @param lifetime  all fights ended by a kill, empty if none
+     */
+    public record ProfileEntry(ModeRating rating, Placement placement, Optional<MetricsSummary> lifetime) {}
+
     private static final List<String> PLAYER_COLUMNS = List.of("uuid", "name", "first_seen", "last_seen");
     private static final List<String> RATING_COLUMNS = List.of(
             "uuid", "gamemode", "elo", "rd", "volatility", "skill", "confidence",
@@ -175,30 +190,59 @@ public class Storage {
 
     /** Aggregates the player's last {@code limit} fights in {@code gamemode} that ended by a kill; empty if none. */
     public CompletableFuture<Optional<MetricsSummary>> metricsSummary(UUID uuid, Gamemode gamemode, int limit) {
+        return db.submit(conn -> summary(conn, uuid, gamemode, limit));
+    }
+
+    // ── Leaderboard ─────────────────────────────────────────────
+
+    /**
+     * Players ranked by Elo in a gamemode (only those with at least one rated fight).
+     *
+     * @param offset rows to skip (page × page size)
+     */
+    public CompletableFuture<List<LeaderRow>> leaderboard(Gamemode gamemode, int offset, int limit) {
         return db.submit(conn -> {
             String sql = """
-                    SELECT COUNT(*), SUM(won), SUM(hits), SUM(swings),
-                           AVG(damage_dealt), AVG(damage_taken), MAX(max_combo),
-                           AVG(avg_combo), AVG(median_combo), AVG(avg_cps), MAX(max_cps), AVG(fight_skill)
-                    FROM (SELECT m.*, CASE WHEN x.winner_uuid = m.uuid THEN 1 ELSE 0 END AS won
-                          FROM metrics m JOIN matches x ON x.id = m.match_id
-                          WHERE m.uuid = ? AND x.gamemode = ? AND x.end_reason = 'KILL'
-                          ORDER BY x.played_at DESC, x.id DESC
-                          LIMIT ?) recent""";
+                    SELECT r.uuid, p.name, r.elo, r.tier, r.provisional, r.wins, r.losses
+                    FROM ratings r LEFT JOIN players p ON p.uuid = r.uuid
+                    WHERE r.gamemode = ? AND r.fights > 0
+                    ORDER BY r.elo DESC, r.uuid
+                    LIMIT ? OFFSET ?""";
             try (PreparedStatement ps = conn.prepareStatement(sql)) {
-                ps.setString(1, uuid.toString());
-                ps.setString(2, gamemode.name());
-                ps.setInt(3, limit);
+                ps.setString(1, gamemode.name());
+                ps.setInt(2, limit);
+                ps.setInt(3, offset);
                 try (ResultSet rs = ps.executeQuery()) {
-                    if (!rs.next() || rs.getInt(1) == 0) return Optional.empty();
-                    long hits = rs.getLong(3), swings = rs.getLong(4);
-                    return Optional.of(new MetricsSummary(
-                            rs.getInt(1), rs.getInt(2),
-                            swings == 0 ? -1 : Math.min(100.0, 100.0 * hits / swings),
-                            rs.getDouble(5), rs.getDouble(6), rs.getInt(7),
-                            rs.getDouble(8), rs.getDouble(9), rs.getDouble(10), rs.getInt(11), rs.getDouble(12)));
+                    List<LeaderRow> out = new ArrayList<>();
+                    while (rs.next()) {
+                        String tier = rs.getString(4);
+                        out.add(new LeaderRow(offset + out.size() + 1, UUID.fromString(rs.getString(1)),
+                                rs.getString(2) != null ? rs.getString(2) : "?", rs.getDouble(3),
+                                tier != null ? Tier.valueOf(tier) : null, rs.getInt(5) == 1,
+                                rs.getInt(6), rs.getInt(7)));
+                    }
+                    return out;
                 }
             }
+        });
+    }
+
+    /** How many players are ranked in a gamemode. */
+    public CompletableFuture<Integer> rankedCount(Gamemode gamemode) {
+        return db.submit(conn -> rankedCount(conn, gamemode));
+    }
+
+    /** Per-gamemode profile: rating, place in the leaderboard and lifetime fight stats. */
+    public CompletableFuture<Map<Gamemode, ProfileEntry>> profile(UUID uuid) {
+        return db.submit(conn -> {
+            Map<Gamemode, ProfileEntry> out = new EnumMap<>(Gamemode.class);
+            for (Gamemode gm : Gamemode.values()) {
+                Optional<ModeRating> r = loadRating(conn, uuid, gm);
+                if (r.isEmpty()) continue;
+                Placement placement = r.get().getFights() > 0 ? placement(conn, gm, r.get().getElo()) : null;
+                out.put(gm, new ProfileEntry(r.get(), placement, summary(conn, uuid, gm, Integer.MAX_VALUE)));
+            }
+            return out;
         });
     }
 
@@ -213,6 +257,56 @@ public class Storage {
     }
 
     // ── SQL helpers (database thread only) ─────────────────────
+
+    private Optional<MetricsSummary> summary(Connection conn, UUID uuid, Gamemode gamemode, int limit)
+            throws SQLException {
+        String sql = """
+                SELECT COUNT(*), SUM(won), SUM(hits), SUM(swings),
+                       AVG(damage_dealt), AVG(damage_taken), MAX(max_combo),
+                       AVG(avg_combo), AVG(median_combo), AVG(avg_cps), MAX(max_cps), AVG(fight_skill)
+                FROM (SELECT m.*, CASE WHEN x.winner_uuid = m.uuid THEN 1 ELSE 0 END AS won
+                      FROM metrics m JOIN matches x ON x.id = m.match_id
+                      WHERE m.uuid = ? AND x.gamemode = ? AND x.end_reason = 'KILL'
+                      ORDER BY x.played_at DESC, x.id DESC
+                      LIMIT ?) recent""";
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, uuid.toString());
+            ps.setString(2, gamemode.name());
+            ps.setInt(3, limit);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next() || rs.getInt(1) == 0) return Optional.empty();
+                long hits = rs.getLong(3), swings = rs.getLong(4);
+                return Optional.of(new MetricsSummary(
+                        rs.getInt(1), rs.getInt(2),
+                        swings == 0 ? -1 : Math.min(100.0, 100.0 * hits / swings),
+                        rs.getDouble(5), rs.getDouble(6), rs.getInt(7),
+                        rs.getDouble(8), rs.getDouble(9), rs.getDouble(10), rs.getInt(11), rs.getDouble(12)));
+            }
+        }
+    }
+
+    /** Place = 1 + players with a strictly higher Elo, so equal ratings share a place. */
+    private Placement placement(Connection conn, Gamemode gm, double elo) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(
+                "SELECT COUNT(*) FROM ratings WHERE gamemode = ? AND fights > 0 AND elo > ?")) {
+            ps.setString(1, gm.name());
+            ps.setDouble(2, elo);
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return new Placement(rs.getInt(1) + 1, rankedCount(conn, gm));
+            }
+        }
+    }
+
+    private int rankedCount(Connection conn, Gamemode gm) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(
+                "SELECT COUNT(*) FROM ratings WHERE gamemode = ? AND fights > 0")) {
+            ps.setString(1, gm.name());
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() ? rs.getInt(1) : 0;
+            }
+        }
+    }
 
     private void upsertPlayer(Connection conn, UUID uuid, String name) throws SQLException {
         long now = clock.millis();

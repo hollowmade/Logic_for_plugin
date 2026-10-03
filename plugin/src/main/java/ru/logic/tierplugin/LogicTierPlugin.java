@@ -7,6 +7,7 @@ import ru.logic.tierplugin.adapter.MetricsListener;
 import ru.logic.tierplugin.commands.DuelCommand;
 import ru.logic.tierplugin.commands.TierAdminCommand;
 import ru.logic.tierplugin.commands.TierCommand;
+import ru.logic.tierplugin.commands.TopCommand;
 import ru.logic.tierplugin.core.RatingService;
 import ru.logic.tierplugin.fight.FightManager;
 import ru.logic.tierplugin.storage.Database;
@@ -63,6 +64,9 @@ public final class LogicTierPlugin extends JavaPlugin {
         Objects.requireNonNull(getCommand("tieradmin")).permissionMessage(
                 Text.parse(Text.PREFIX + "<#FF6B6B>Недостаточно прав."));
         Objects.requireNonNull(getCommand("duel")).setExecutor(new DuelCommand(this));
+        TopCommand top = new TopCommand(this);
+        Objects.requireNonNull(getCommand("top")).setExecutor(top);
+        Objects.requireNonNull(getCommand("top")).setTabCompleter(top);
 
         // 5. Events (players already online after /reload are registered too)
         getServer().getPluginManager().registerEvents(new FightListener(this), this);

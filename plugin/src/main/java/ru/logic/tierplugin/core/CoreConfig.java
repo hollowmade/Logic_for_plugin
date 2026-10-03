@@ -145,7 +145,7 @@ public record CoreConfig(
 
         return new CoreConfig(
                 tiers,
-                new Elo(1000, 350, 0.06, 60, 0.97, new double[]{1.00, 0.70, 0.50, 0.30, 0.10}, 20, 1.5),
+                new Elo(1000, 350, 0.06, 60, 0.97, new double[]{1.00, 0.70, 0.50, 0.30, 0.10}, 5, 1.5),
                 new Skill(8, 0.2, weights),
                 new TierRules(10, 30),
                 15,

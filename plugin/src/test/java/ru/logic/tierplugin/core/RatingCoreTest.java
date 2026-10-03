@@ -82,8 +82,8 @@ class RatingCoreTest {
         assertEquals(0.50, e.diminishingFactor(3));
         assertEquals(0.30, e.diminishingFactor(4));
         assertEquals(0.10, e.diminishingFactor(5));
-        assertEquals(0.10, e.diminishingFactor(20));
-        assertEquals(0.0, e.diminishingFactor(21), "past the daily cap a match is unrated");
+        assertEquals(0.0, e.diminishingFactor(6), "from the 6th match of a pair per day: no rating");
+        assertEquals(0.0, e.diminishingFactor(21));
     }
 
     @Test
@@ -99,7 +99,7 @@ class RatingCoreTest {
     @Test
     void farmingOneOpponentIsCapped() {
         Simulator.FarmReport f = Simulator.farm(config, 100);
-        assertEquals(20, f.ratedFights());
+        assertEquals(5, f.ratedFights());
         assertTrue(f.eloGained() < f.eloGainedWithoutProtection() / 3,
                 "protected " + f.eloGained() + " vs unprotected " + f.eloGainedWithoutProtection());
     }
