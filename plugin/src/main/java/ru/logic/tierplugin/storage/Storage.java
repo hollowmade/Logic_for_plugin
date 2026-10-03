@@ -46,9 +46,8 @@ public class Storage {
                                  int bestCombo, double avgCombo, double avgMedianCombo,
                                  double avgCps, int peakCps, double avgFightSkill) {}
 
-    /** One row of the leaderboard. */
-    public record LeaderRow(int place, UUID uuid, String name, double elo, Tier tier, boolean provisional,
-                            int wins, int losses) {}
+    /** One row of a ranking by some stat. */
+    public record StatRow(int place, UUID uuid, String name, double value, int fights) {}
 
     /** A player's place among everyone ranked in a gamemode. */
     public record Placement(int place, int total) {}
@@ -193,43 +192,43 @@ public class Storage {
         return db.submit(conn -> summary(conn, uuid, gamemode, limit));
     }
 
-    // ── Leaderboard ─────────────────────────────────────────────
+    // ── Leaderboards ────────────────────────────────────────────
 
     /**
-     * Players ranked by Elo in a gamemode (only those with at least one rated fight).
-     *
-     * @param offset rows to skip (page × page size)
+     * Full ranking by {@code stat}, best first. Equal values share a place.
+     * Players with fewer than {@code minFights} fights (or no value) are left out,
+     * so one lucky fight cannot top a ranking.
      */
-    public CompletableFuture<List<LeaderRow>> leaderboard(Gamemode gamemode, int offset, int limit) {
+    public CompletableFuture<List<StatRow>> ranking(Gamemode gamemode, TopStat stat, int minFights) {
         return db.submit(conn -> {
-            String sql = """
-                    SELECT r.uuid, p.name, r.elo, r.tier, r.provisional, r.wins, r.losses
-                    FROM ratings r LEFT JOIN players p ON p.uuid = r.uuid
-                    WHERE r.gamemode = ? AND r.fights > 0
-                    ORDER BY r.elo DESC, r.uuid
-                    LIMIT ? OFFSET ?""";
+            String sql = stat.fromRatings()
+                    ? "SELECT r.uuid, p.name, " + stat.sqlValue() + " AS v, r.fights AS f"
+                      + " FROM ratings r LEFT JOIN players p ON p.uuid = r.uuid"
+                      + " WHERE r.gamemode = ? AND r.fights >= ?"
+                    : "SELECT s.uuid, p.name, " + stat.sqlValue() + " AS v, COUNT(*) AS f"
+                      + " FROM metrics s JOIN matches x ON x.id = s.match_id"
+                      + " LEFT JOIN players p ON p.uuid = s.uuid"
+                      + " WHERE x.gamemode = ? AND x.end_reason = 'KILL'"
+                      + " GROUP BY s.uuid, p.name HAVING COUNT(*) >= ?";
+            sql = "SELECT * FROM (" + sql + ") t WHERE v IS NOT NULL ORDER BY v DESC, uuid";
             try (PreparedStatement ps = conn.prepareStatement(sql)) {
                 ps.setString(1, gamemode.name());
-                ps.setInt(2, limit);
-                ps.setInt(3, offset);
+                ps.setInt(2, Math.max(1, minFights));
                 try (ResultSet rs = ps.executeQuery()) {
-                    List<LeaderRow> out = new ArrayList<>();
+                    List<StatRow> out = new ArrayList<>();
+                    double prev = Double.NaN;
+                    int place = 0;
                     while (rs.next()) {
-                        String tier = rs.getString(4);
-                        out.add(new LeaderRow(offset + out.size() + 1, UUID.fromString(rs.getString(1)),
-                                rs.getString(2) != null ? rs.getString(2) : "?", rs.getDouble(3),
-                                tier != null ? Tier.valueOf(tier) : null, rs.getInt(5) == 1,
-                                rs.getInt(6), rs.getInt(7)));
+                        double v = rs.getDouble(3);
+                        if (v != prev) place = out.size() + 1;
+                        prev = v;
+                        out.add(new StatRow(place, UUID.fromString(rs.getString(1)),
+                                rs.getString(2) != null ? rs.getString(2) : "?", v, rs.getInt(4)));
                     }
                     return out;
                 }
             }
         });
-    }
-
-    /** How many players are ranked in a gamemode. */
-    public CompletableFuture<Integer> rankedCount(Gamemode gamemode) {
-        return db.submit(conn -> rankedCount(conn, gamemode));
     }
 
     /** Per-gamemode profile: rating, place in the leaderboard and lifetime fight stats. */

@@ -6,8 +6,10 @@ import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 import org.jetbrains.annotations.NotNull;
 import ru.logic.tierplugin.LogicTierPlugin;
+import ru.logic.tierplugin.core.CoreConfig;
 import ru.logic.tierplugin.core.Gamemode;
 import ru.logic.tierplugin.core.ModeRating;
+import ru.logic.tierplugin.core.Tier;
 import ru.logic.tierplugin.storage.Storage;
 import ru.logic.tierplugin.text.Text;
 
@@ -50,14 +52,14 @@ public class TierCommand implements CommandExecutor {
                     } else if (res == null) {
                         Text.error(sender, "Игрок <name> ещё не заходил на сервер.", Text.plain("name", args[0]));
                     } else {
-                        show(sender, res.getKey().name(), res.getValue());
+                        show(sender, res.getKey().name(), res.getValue(), plugin.getRatingService().getConfig());
                     }
                 }));
         return true;
     }
 
     /** Profile card: one block per gamemode the player has fought in. */
-    static void show(CommandSender sender, String name, Map<Gamemode, Storage.ProfileEntry> profile) {
+    static void show(CommandSender sender, String name, Map<Gamemode, Storage.ProfileEntry> profile, CoreConfig cfg) {
         Text.line(sender, Text.RULE);
         Text.line(sender, " <gradient:#FFB347:#FF5E3A><bold>Профиль</bold></gradient> <white><bold><name></bold></white>",
                 Text.plain("name", name));
@@ -83,6 +85,7 @@ public class TierCommand implements CommandExecutor {
                     + Text.DOT + "<gray>Победы</gray> <green>" + r.getWins() + "</green>"
                     + Text.DOT + "<gray>Поражения</gray> <red>" + r.getLosses() + "</red>"
                     + (fights > 0 ? Text.DOT + "<gray>Винрейт</gray> <white>" + Text.percent((double) r.getWins() / fights) + "</white>" : ""));
+            Text.line(sender, "   " + nextTier(r, cfg));
             e.lifetime().ifPresent(m -> Text.line(sender, "   <gray>За всё время:</gray> <gray>точность</gray> <white>"
                     + (m.accuracy() < 0 ? "—" : Text.num(m.accuracy(), 0) + "%") + "</white>"
                     + Text.DOT + "<gray>КПС</gray> <white>" + Text.num(m.avgCps(), 1) + "</white>"
@@ -91,5 +94,37 @@ public class TierCommand implements CommandExecutor {
                     + "</white><dark_gray>/</dark_gray><white>" + Text.num(m.avgDamageTaken(), 1) + "</white>"));
         }
         Text.line(sender, Text.RULE);
+    }
+
+    /**
+     * What the player still needs: during placement the fights left, afterwards
+     * every requirement of the next tier with a tick or a cross.
+     */
+    static String nextTier(ModeRating r, CoreConfig cfg) {
+        int placement = cfg.tierRules().placementFights();
+        if (r.getFights() < placement) {
+            int left = placement - r.getFights();
+            return "<hover:show_text:'<gray>Пока идёт калибровка, тир оценивается только\nпо рейтингу и навыку и может меняться.</gray>'>"
+                    + "<gray>Калибровка: до закрепления тира осталось</gray> <white>" + left + "</white> <gray>"
+                    + (left % 10 == 1 && left % 100 != 11 ? "бой" : left % 10 >= 2 && left % 10 <= 4 && (left % 100 < 12 || left % 100 > 14) ? "боя" : "боёв")
+                    + "</gray></hover>";
+        }
+        Tier current = r.getTier();
+        if (current == Tier.HT1) return "<" + Text.ACCENT + ">Максимальный тир достигнут</" + Text.ACCENT + ">";
+        Tier next = current == null ? Tier.LT5 : Tier.values()[current.ordinal() + 1];
+        CoreConfig.TierThreshold t = cfg.tiers().get(next);
+        if (t == null) return "";
+        return "<hover:show_text:'<gray>Тир выдаётся, когда выполнены все условия сразу.</gray>'>"
+                + "<gray>До</gray> " + Text.tier(next) + "<gray>:</gray></hover> "
+                + check(r.getElo() >= t.minElo(), "Elo", Math.round(r.getElo()) + "/" + Math.round(t.minElo()))
+                + Text.DOT + check(r.getSkillScore() >= t.minSkill(), "навык",
+                        Text.num(r.getSkillScore(), 0) + "/" + Text.num(t.minSkill(), 0))
+                + Text.DOT + check(r.getConfidence() >= t.minConfidence(), "уверенность",
+                        Text.percent(r.getConfidence()) + "/" + Text.percent(t.minConfidence()))
+                + Text.DOT + check(r.getFights() >= t.minFights(), "боёв", r.getFights() + "/" + t.minFights());
+    }
+
+    private static String check(boolean ok, String label, String value) {
+        return (ok ? "<green>✔</green>" : "<red>✖</red>") + " <gray>" + label + "</gray> <white>" + value + "</white>";
     }
 }

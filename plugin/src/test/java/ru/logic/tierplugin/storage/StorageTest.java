@@ -236,12 +236,10 @@ class StorageTest {
         s.recordMatch(a, b, sword(), rating).join();   // Alice up, Bob down
         s.recordMatch(c, b, sword(), rating).join();   // Carl up, Bob down again
 
-        var top = s.leaderboard(Gamemode.SWORD, 0, 10).join();
+        var top = s.ranking(Gamemode.SWORD, TopStat.ELO, 1).join();
         assertEquals(3, top.size());
         assertEquals("Bob", top.get(2).name(), "the double loser is last");
-        assertEquals(List.of(1, 2, 3), top.stream().map(Storage.LeaderRow::place).toList());
-        assertEquals(1, s.leaderboard(Gamemode.SWORD, 2, 10).join().size(), "offset pages the list");
-        assertEquals(3, s.rankedCount(Gamemode.SWORD).join());
+        assertEquals(3, top.get(2).place());
 
         var bob = s.profile(b).join().get(Gamemode.SWORD);
         assertEquals(new Storage.Placement(3, 3), bob.placement());
@@ -254,8 +252,41 @@ class StorageTest {
         Storage s = open(noon);
         ModeRating r = rating.newRating(a, Gamemode.SWORD);   // e.g. tier set by an admin, no fights
         s.saveRating(r).join();
-        assertTrue(s.leaderboard(Gamemode.SWORD, 0, 10).join().isEmpty());
+        assertTrue(s.ranking(Gamemode.SWORD, TopStat.ELO, 1).join().isEmpty());
         assertNull(s.profile(a).join().get(Gamemode.SWORD).placement());
+    }
+
+    @Test
+    void rankingByFightStats() throws Exception {
+        UUID c = UUID.randomUUID();
+        Storage s = open(noon);
+        // a: 2 fights, 9 of 10 hits, combos 4 and 2 -> mean combo 3
+        s.recordMatch(a, b, new MatchInput(Gamemode.SWORD, 1, 0,
+                new FightMetrics(5, 5, 20, 0, 4, 4, 4, 1, 8, 10), FightMetrics.basic(1, 4, 2, 20, 1), 1000), rating).join();
+        s.recordMatch(a, c, new MatchInput(Gamemode.SWORD, 1, 0,
+                new FightMetrics(5, 4, 20, 2, 2, 2, 2, 1, 6, 8), FightMetrics.basic(3, 3, 2, 20, 1), 1000), rating).join();
+
+        var acc = s.ranking(Gamemode.SWORD, TopStat.ACCURACY, 1).join();
+        assertEquals(a, acc.get(0).uuid());
+        assertEquals(0.9, acc.get(0).value(), 1e-9);
+        assertEquals(2, acc.get(0).fights());
+
+        var combo = s.ranking(Gamemode.SWORD, TopStat.COMBO, 1).join();
+        assertEquals(1, combo.size(), "players without any combo have no value and are left out");
+        assertEquals(3.0, combo.get(0).value(), 1e-9);
+
+        assertEquals(1, s.ranking(Gamemode.SWORD, TopStat.ACCURACY, 2).join().size(), "min fights filter");
+        assertEquals(a, s.ranking(Gamemode.SWORD, TopStat.WINS, 1).join().get(0).uuid());
+    }
+
+    @Test
+    void equalValuesShareAPlace() throws Exception {
+        UUID c = UUID.randomUUID(), d = UUID.randomUUID();
+        Storage s = open(noon);
+        s.recordMatch(a, b, sword(), rating).join();
+        s.recordMatch(c, d, sword(), rating).join();
+        var wins = s.ranking(Gamemode.SWORD, TopStat.WINS, 1).join();
+        assertEquals(List.of(1, 1, 3, 3), wins.stream().map(Storage.StatRow::place).toList());
     }
 
     @Test

@@ -152,7 +152,7 @@ public class TierAdminCommand implements TabExecutor {
                         Map::entry)
                 .whenComplete((res, err) -> plugin.sync(() -> {
                     if (err != null) { dbError(sender); return; }
-                    TierCommand.show(sender, ref.name(), res.getKey());
+                    TierCommand.show(sender, ref.name(), res.getKey(), plugin.getRatingService().getConfig());
                     long blocked = leave.blockedUntil(res.getValue(), System.currentTimeMillis());
                     Text.line(sender, " <gray>Выходов из боя за " + leave.windowHours() + " ч:</gray> <white>"
                             + res.getValue().size() + "</white>"

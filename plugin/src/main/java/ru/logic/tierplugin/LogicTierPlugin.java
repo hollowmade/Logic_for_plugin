@@ -33,6 +33,7 @@ public final class LogicTierPlugin extends JavaPlugin {
     private MetricsTracker metricsTracker;
     private MetricsListener metricsListener;
     private int metricsSummaryFights;
+    private int topMinFights;
 
     @Override
     public void onEnable() {
@@ -55,6 +56,7 @@ public final class LogicTierPlugin extends JavaPlugin {
         fightManager = new FightManager(this, ConfigLoader.fight(getConfig()));
         metricsTracker = new MetricsTracker(fightManager, ConfigLoader.tracker(getConfig()));
         metricsSummaryFights = getConfig().getInt("metrics.summary_fights", 20);
+        topMinFights = getConfig().getInt("top.min_fights", 3);
 
         // 4. Commands
         Objects.requireNonNull(getCommand("tier")).setExecutor(new TierCommand(this));
@@ -96,4 +98,6 @@ public final class LogicTierPlugin extends JavaPlugin {
     public MetricsListener getMetricsListener() { return metricsListener; }
     /** How many recent fights {@code /tieradmin metrics} aggregates. */
     public int getMetricsSummaryFights() { return metricsSummaryFights; }
+    /** Fewest fights to appear in /top rankings by averages. */
+    public int getTopMinFights() { return topMinFights; }
 }

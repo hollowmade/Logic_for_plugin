@@ -11,8 +11,8 @@ commands:
     usage: /tier [игрок]
     permission: tierplugin.tier
   top:
-    description: Топ игроков по рейтингу и твоё место
-    usage: /top [режим] [страница]
+    description: Топы игроков (рейтинг, навык, точность, комбо, КПС, винрейт) и твоё место
+    usage: /top [рейтинг|навык|точность|комбо|серия|кпс|винрейт|победы] [страница]
     permission: tierplugin.tier
   tieradmin:
     description: Управление тирами для администраторов
