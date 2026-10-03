@@ -8,6 +8,12 @@ import java.util.List;
 /**
  * Raw telemetry of one player in one fight, turned into {@link FightMetrics} on demand.
  * <p>
+ * Attacks: a melee hit arrives as an attack packet plus a swing packet in the same
+ * tick, but the client does not send a swing packet for every click when clicking
+ * fast. So within one tick, swings and hits are paired: the number of attacks in a
+ * tick is {@code max(swings, hits)}. A hit therefore always counts as an attack and
+ * accuracy can never exceed 100 %.
+ * <p>
  * Combo: consecutive melee hits on the opponent. A streak ends when the player
  * takes a melee hit from the opponent (the "can't hit back" part of a combo) or
  * when the gap to the next hit exceeds {@code comboTimeoutMs}.
@@ -18,7 +24,11 @@ final class CombatLog {
 
     private final TrackerSettings settings;
 
+    /** Time of every attack (hit or miss), for CPS. Its size is the attack count. */
     private final List<Long> swingTimes = new ArrayList<>();
+    private int tick = Integer.MIN_VALUE;
+    private int swingsInTick;
+    private int hitsInTick;
     private int hits;
     private double damageDealt;
     private double damageTaken;
@@ -31,12 +41,17 @@ final class CombatLog {
         this.settings = settings;
     }
 
-    void swing(long now) {
-        swingTimes.add(now);
+    void swing(long now, int tick) {
+        roll(tick);
+        swingsInTick++;
+        if (swingsInTick > hitsInTick) swingTimes.add(now); // not already counted by a hit
     }
 
-    /** A melee hit on the opponent: counts for accuracy and extends the combo. */
-    void meleeHit(long now, double damage) {
+    /** A melee hit on the opponent: counts as an attack, for accuracy and extends the combo. */
+    void meleeHit(long now, int tick, double damage) {
+        roll(tick);
+        hitsInTick++;
+        if (hitsInTick > swingsInTick) swingTimes.add(now); // its swing packet is missing or still to come
         if (streak > 0 && now - lastHitAt > settings.comboTimeoutMs()) closeStreak();
         streak++;
         lastHitAt = now;
@@ -56,6 +71,14 @@ final class CombatLog {
 
     void damageTaken(double damage) {
         damageTaken += damage;
+    }
+
+    private void roll(int t) {
+        if (t != tick) {
+            tick = t;
+            swingsInTick = 0;
+            hitsInTick = 0;
+        }
     }
 
     private void closeStreak() {

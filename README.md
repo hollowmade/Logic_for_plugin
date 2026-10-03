@@ -42,6 +42,7 @@ gradlew.bat runSimulation
 | `/tieradmin reset <игрок> [режим]` | сбросить рейтинг |
 | `/tieradmin metrics <игрок> [режим]` | метрики текущего боя и сводка по последним 20 боям |
 | `/tieradmin info <игрок>`, `/tieradmin stats` | диагностика |
+| `/tieradmin debug` | вкл/выкл лог каждого взмаха и удара в консоль сервера |
 
 ## Выход из боя
 

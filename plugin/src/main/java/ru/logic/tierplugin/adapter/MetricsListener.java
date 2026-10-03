@@ -20,6 +20,7 @@ import ru.logic.tierplugin.tracker.MetricsTracker;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.logging.Logger;
 
 /**
  * Translates Bukkit combat events into {@link MetricsTracker} calls.
@@ -35,21 +36,37 @@ import java.util.concurrent.ConcurrentHashMap;
 public class MetricsListener implements Listener {
 
     private final MetricsTracker tracker;
+    private final Logger log;
 
     /** Tick of each player's last right-click interaction. */
     private final Map<UUID, Integer> lastUseTick = new ConcurrentHashMap<>();
 
-    public MetricsListener(MetricsTracker tracker) {
+    /** When on, every swing and hit of fighting players is logged to the console. */
+    private volatile boolean debug;
+
+    public MetricsListener(MetricsTracker tracker, Logger log) {
         this.tracker = tracker;
+        this.log = log;
+    }
+
+    /** Toggles console logging of raw swing/hit events. @return the new state */
+    public boolean toggleDebug() {
+        debug = !debug;
+        return debug;
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
     public void onSwing(PlayerArmSwingEvent event) {
         if (event.getHand() != EquipmentSlot.HAND) return;
         UUID id = event.getPlayer().getUniqueId();
+        int tick = Bukkit.getCurrentTick();
         Integer useTick = lastUseTick.get(id);
-        if (useTick != null && useTick == Bukkit.getCurrentTick()) return;
-        tracker.swing(id, System.currentTimeMillis());
+        if (useTick != null && useTick == tick) {
+            if (debug) log.info("[metrics] tick " + tick + " SWING " + event.getPlayer().getName() + " (ignored: item use)");
+            return;
+        }
+        if (debug) log.info("[metrics] tick " + tick + " SWING " + event.getPlayer().getName());
+        tracker.swing(id, System.currentTimeMillis(), tick);
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
@@ -75,7 +92,10 @@ public class MetricsListener implements Listener {
         if (attacker == null) return;
 
         if (byEntity.getDamager() == attacker && event.getCause() == EntityDamageEvent.DamageCause.ENTITY_ATTACK) {
-            tracker.meleeHit(attacker.getUniqueId(), victim.getUniqueId(), damage, System.currentTimeMillis());
+            int tick = Bukkit.getCurrentTick();
+            if (debug) log.info(String.format("[metrics] tick %d HIT %s -> %s %.1f",
+                    tick, attacker.getName(), victim.getName(), damage));
+            tracker.meleeHit(attacker.getUniqueId(), victim.getUniqueId(), damage, System.currentTimeMillis(), tick);
         } else {
             tracker.indirectDamage(attacker.getUniqueId(), victim.getUniqueId(), damage);
         }

@@ -24,7 +24,7 @@ import java.util.function.Consumer;
  */
 public class TierAdminCommand implements TabExecutor {
 
-    private static final List<String> SUBS = List.of("set", "reset", "info", "metrics", "fight", "simulate", "stats");
+    private static final List<String> SUBS = List.of("set", "reset", "info", "metrics", "fight", "simulate", "stats", "debug");
     private static final String USAGE = String.join("\n",
             "§e/tieradmin set <player> <mode> <tier>",
             "§e/tieradmin reset <player> [mode]",
@@ -32,7 +32,8 @@ public class TierAdminCommand implements TabExecutor {
             "§e/tieradmin metrics <player> [mode] §7— live fight + last fights summary",
             "§e/tieradmin fight <player1> <player2> [mode] §7— start a tracked fight",
             "§e/tieradmin simulate [players] [days] §7— offline formula check",
-            "§e/tieradmin stats");
+            "§e/tieradmin stats",
+            "§e/tieradmin debug §7— log every swing/hit of fighting players to the console");
 
     private final LogicTierPlugin plugin;
 
@@ -61,6 +62,9 @@ public class TierAdminCommand implements TabExecutor {
             case "simulate" -> simulate(sender, args);
             case "stats" -> plugin.getStorage().countMatches().whenComplete((n, err) -> plugin.sync(() ->
                     sender.sendMessage(err != null ? "§cDatabase error." : "§7Matches stored: §f" + n)));
+            case "debug" -> sender.sendMessage(plugin.getMetricsListener().toggleDebug()
+                    ? "§eMetrics debug ON: swings and hits are logged to the server console."
+                    : "§eMetrics debug OFF.");
             default -> sender.sendMessage(USAGE);
         }
         return true;

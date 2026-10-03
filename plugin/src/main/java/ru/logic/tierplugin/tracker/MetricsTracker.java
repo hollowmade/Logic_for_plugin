@@ -29,15 +29,19 @@ public class MetricsTracker {
         this.settings = settings;
     }
 
-    /** An attack swing of the main hand (hit or miss). */
-    public void swing(UUID player, long now) {
-        fights.fightOf(player).ifPresent(f -> log(f, player).swing(now));
+    /**
+     * An attack swing of the main hand (hit or miss).
+     *
+     * @param tick server tick; a swing and a hit in the same tick are one attack
+     */
+    public void swing(UUID player, long now, int tick) {
+        fights.fightOf(player).ifPresent(f -> log(f, player).swing(now, tick));
     }
 
     /** A direct melee hit of {@code attacker} on {@code victim}. */
-    public void meleeHit(UUID attacker, UUID victim, double damage, long now) {
+    public void meleeHit(UUID attacker, UUID victim, double damage, long now, int tick) {
         sameFight(attacker, victim).ifPresent(f -> {
-            log(f, attacker).meleeHit(now, damage);
+            log(f, attacker).meleeHit(now, tick, damage);
             log(f, victim).hitByOpponent();
         });
     }

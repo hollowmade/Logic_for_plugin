@@ -33,10 +33,19 @@ class MetricsTrackerTest {
     private final MetricsTracker tracker = new MetricsTracker(fights, new TrackerSettings(1500, 2));
     private final UUID a = UUID.randomUUID(), b = UUID.randomUUID(), outsider = UUID.randomUUID();
 
-    /** Swing + hit at the same moment, as an attack arrives from the client. */
+    /** Server tick of a time in ms (50 ms per tick). */
+    private static int tick(long t) {
+        return (int) (t / 50);
+    }
+
+    private void swing(UUID player, long t) {
+        tracker.swing(player, t, tick(t));
+    }
+
+    /** Swing + hit in the same tick, as an attack arrives from the client. */
     private void attack(UUID attacker, UUID victim, long t) {
-        tracker.meleeHit(attacker, victim, 4.0, t);
-        tracker.swing(attacker, t);
+        tracker.meleeHit(attacker, victim, 4.0, t, tick(t));
+        tracker.swing(attacker, t, tick(t));
     }
 
     @Test
@@ -44,8 +53,8 @@ class MetricsTrackerTest {
         ActiveFights.FightRef f = fights.start(a, b);
         attack(a, b, 0);
         attack(a, b, 600);
-        tracker.swing(a, 1200); // miss
-        tracker.swing(a, 1800); // miss
+        swing(a, 1200); // miss
+        swing(a, 1800); // miss
         tracker.damageTaken(b, 4.0);
         tracker.damageTaken(b, 4.0);
 
@@ -111,8 +120,8 @@ class MetricsTrackerTest {
     @Test
     void cpsAverageAndPeak() {
         ActiveFights.FightRef f = fights.start(a, b);
-        for (int i = 0; i < 10; i++) tracker.swing(a, i * 100);      // 10 swings in second 0
-        for (int i = 0; i < 4; i++) tracker.swing(a, 5000 + i * 250); // 4 swings in second 5
+        for (int i = 0; i < 10; i++) swing(a, i * 100);      // 10 swings in second 0
+        for (int i = 0; i < 4; i++) swing(a, 5000 + i * 250); // 4 swings in second 5
 
         FightMetrics ma = tracker.finish(f).get(a);
         assertEquals(10, ma.maxCps());
@@ -122,9 +131,9 @@ class MetricsTrackerTest {
     @Test
     void ignoresPlayersOutsideTheFightAndThirdParties() {
         ActiveFights.FightRef f = fights.start(a, b);
-        tracker.swing(outsider, 0);
-        tracker.meleeHit(outsider, a, 4, 0);
-        tracker.meleeHit(a, outsider, 4, 0);
+        swing(outsider, 0);
+        tracker.meleeHit(outsider, a, 4, 0, 0);
+        tracker.meleeHit(a, outsider, 4, 0, 0);
 
         Map<UUID, FightMetrics> m = tracker.finish(f);
         assertEquals(FightMetrics.EMPTY, m.get(b));
@@ -150,6 +159,42 @@ class MetricsTrackerTest {
         attack(a, b, 1000);
         assertEquals(3, tracker.finish(f).get(a).maxCombo(), "snapshot must not close the running streak");
         assertEquals(FightMetrics.EMPTY, tracker.finish(f).get(a));
+    }
+
+    @Test
+    void hitWithoutSwingPacketStillCountsAsAnAttack() {
+        // Fast clicking: the client skips swing packets while the arm animation is running
+        ActiveFights.FightRef f = fights.start(a, b);
+        attack(a, b, 0);
+        for (int i = 1; i <= 12; i++) tracker.meleeHit(a, b, 2.0, i * 100L, tick(i * 100L));
+
+        FightMetrics ma = tracker.finish(f).get(a);
+        assertEquals(13, ma.hits());
+        assertEquals(13, ma.swings(), "every hit is an attack");
+        assertEquals(100.0, ma.accuracy(), 1e-9);
+    }
+
+    @Test
+    void swingAndHitInOneTickAreOneAttackInEitherOrder() {
+        ActiveFights.FightRef f = fights.start(a, b);
+        swing(a, 0);
+        tracker.meleeHit(a, b, 4, 0, tick(0));   // swing first, then hit, same tick
+        attack(a, b, 500);                        // hit first, then swing, same tick
+        FightMetrics ma = tracker.finish(f).get(a);
+        assertEquals(2, ma.swings());
+        assertEquals(2, ma.hits());
+    }
+
+    @Test
+    void twoClicksInOneTickWithOneHit() {
+        ActiveFights.FightRef f = fights.start(a, b);
+        swing(a, 0);
+        swing(a, 10);
+        tracker.meleeHit(a, b, 4, 10, tick(10));
+        FightMetrics ma = tracker.finish(f).get(a);
+        assertEquals(2, ma.swings());
+        assertEquals(1, ma.hits());
+        assertEquals(1, ma.misses());
     }
 
     @Test

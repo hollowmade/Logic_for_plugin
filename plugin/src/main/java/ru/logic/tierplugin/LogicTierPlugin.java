@@ -29,6 +29,7 @@ public final class LogicTierPlugin extends JavaPlugin {
     private RatingService ratingService;
     private FightManager fightManager;
     private MetricsTracker metricsTracker;
+    private MetricsListener metricsListener;
     private int metricsSummaryFights;
 
     @Override
@@ -62,7 +63,8 @@ public final class LogicTierPlugin extends JavaPlugin {
 
         // 5. Events (players already online after /reload are registered too)
         getServer().getPluginManager().registerEvents(new FightListener(this), this);
-        getServer().getPluginManager().registerEvents(new MetricsListener(metricsTracker), this);
+        metricsListener = new MetricsListener(metricsTracker, getLogger());
+        getServer().getPluginManager().registerEvents(metricsListener, this);
         getServer().getOnlinePlayers().forEach(p -> storage.touchPlayer(p.getUniqueId(), p.getName()));
 
         getLogger().info("Enabled successfully.");
@@ -84,6 +86,7 @@ public final class LogicTierPlugin extends JavaPlugin {
     public RatingService getRatingService() { return ratingService; }
     public FightManager getFightManager() { return fightManager; }
     public MetricsTracker getMetricsTracker() { return metricsTracker; }
+    public MetricsListener getMetricsListener() { return metricsListener; }
     /** How many recent fights {@code /tieradmin metrics} aggregates. */
     public int getMetricsSummaryFights() { return metricsSummaryFights; }
 }
