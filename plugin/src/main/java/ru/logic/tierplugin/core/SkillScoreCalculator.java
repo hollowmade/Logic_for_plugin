@@ -4,7 +4,9 @@ package ru.logic.tierplugin.core;
  * Calculates a normalised Skill Score (0–100) from three core metrics:
  * <ul>
  *   <li><b>Accuracy</b>  — hit% normalised to 0–100</li>
- *   <li><b>Damage</b>    — damage dealt normalised against a configurable cap</li>
+ *   <li><b>Damage</b>    — share of the fight's damage dealt by the player
+ *                          (dealt / (dealt + taken)): a 1v1 duel to one kill always
+ *                          deals about 20 HP, so absolute damage says little</li>
  *   <li><b>Combo</b>     — max combo normalised against a configurable cap</li>
  * </ul>
  * Weights come from {@code skill_weights.<gamemode>} in config.yml.
@@ -25,7 +27,8 @@ public class SkillScoreCalculator {
 
         // No swings recorded → neutral accuracy rather than a penalty
         double accuracyScore = m.accuracy() < 0 ? 50.0 : m.accuracy();
-        double damageScore = Math.min(100.0, 100.0 * m.damageDealt() / skill.damageCap());
+        double total = m.damageDealt() + m.damageTaken();
+        double damageScore = total <= 0 ? 50.0 : 100.0 * m.damageDealt() / total;
         double comboScore = Math.min(100.0, 100.0 * m.maxCombo() / skill.comboCap());
 
         return w.accuracy() * accuracyScore

@@ -2,30 +2,30 @@ name: LogicTierPlugin
 version: 1.0.0-SNAPSHOT
 main: ru.logic.tierplugin.LogicTierPlugin
 api-version: '1.21'
-description: PvP tier system with per-gamemode Elo and automatic LT5-HT1 tiers
+description: Автоматическая выдача PvP-тиров LT5–HT1 по рейтингу Elo и метрикам боя
 authors: [Logic]
 
 commands:
   tier:
-    description: Show player tier info
-    usage: /tier [player]
+    description: Профиль игрока — тир, рейтинг и статистика
+    usage: /tier [игрок]
     permission: tierplugin.tier
   tieradmin:
-    description: Admin tier management
-    usage: /tieradmin <set|reset|info|fight|simulate|stats> [args]
+    description: Управление тирами для администраторов
+    usage: /tieradmin <fight|metrics|info|set|reset|simulate|stats|debug>
     permission: tierplugin.admin
   duel:
-    description: Manage duels
-    usage: /duel <request|accept|decline> [player]
+    description: Дуэли (в разработке)
+    usage: /duel <request|accept|decline> [игрок]
     permission: tierplugin.duel
 
 permissions:
   tierplugin.tier:
-    description: View tier information
+    description: Смотреть профили и тиры
     default: true
   tierplugin.duel:
-    description: Use duel system
+    description: Вызывать на дуэль
     default: true
   tierplugin.admin:
-    description: Admin commands
+    description: Команды администратора
     default: op

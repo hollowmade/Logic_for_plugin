@@ -11,6 +11,7 @@ import ru.logic.tierplugin.core.RatingService;
 import ru.logic.tierplugin.fight.FightManager;
 import ru.logic.tierplugin.storage.Database;
 import ru.logic.tierplugin.storage.Storage;
+import ru.logic.tierplugin.text.Text;
 import ru.logic.tierplugin.tracker.MetricsTracker;
 
 import java.sql.SQLException;
@@ -43,7 +44,7 @@ public final class LogicTierPlugin extends JavaPlugin {
         try {
             database = new Database(ConfigLoader.database(getConfig(), getDataFolder()), getLogger());
         } catch (SQLException | RuntimeException e) {
-            getLogger().log(Level.SEVERE, "Failed to initialise database. Disabling plugin.", e);
+            getLogger().log(Level.SEVERE, "Не удалось подключиться к базе данных. Плагин выключается.", e);
             getServer().getPluginManager().disablePlugin(this);
             return;
         }
@@ -59,6 +60,8 @@ public final class LogicTierPlugin extends JavaPlugin {
         TierAdminCommand admin = new TierAdminCommand(this);
         Objects.requireNonNull(getCommand("tieradmin")).setExecutor(admin);
         Objects.requireNonNull(getCommand("tieradmin")).setTabCompleter(admin);
+        Objects.requireNonNull(getCommand("tieradmin")).permissionMessage(
+                Text.parse(Text.PREFIX + "<#FF6B6B>Недостаточно прав."));
         Objects.requireNonNull(getCommand("duel")).setExecutor(new DuelCommand(this));
 
         // 5. Events (players already online after /reload are registered too)
@@ -67,14 +70,14 @@ public final class LogicTierPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(metricsListener, this);
         getServer().getOnlinePlayers().forEach(p -> storage.touchPlayer(p.getUniqueId(), p.getName()));
 
-        getLogger().info("Enabled successfully.");
+        getLogger().info("Плагин включён.");
     }
 
     @Override
     public void onDisable() {
         if (fightManager != null) fightManager.shutdown();
         if (database != null) database.close(); // drains queued writes first
-        getLogger().info("Disabled.");
+        getLogger().info("Плагин выключен.");
     }
 
     /** Runs {@code task} on the main server thread (Bukkit API is not thread-safe). */

@@ -1,21 +1,27 @@
 # ============================================================
-#  LogicTierPlugin - Configuration
+#  LogicTierPlugin — настройки
+#  После изменений перезапустите сервер.
 # ============================================================
 
-# SQLite is the default. How to switch to MySQL and where to host it: docs/MYSQL.md
+# ── База данных ──────────────────────────────────────────────
+# По умолчанию SQLite (один файл в папке плагина).
+# Как перейти на MySQL и где её держать: docs/MYSQL.md
 database:
   type: sqlite          # sqlite | mysql
-  file: tierplugin.db   # for sqlite only
-  host: localhost
+  file: tierplugin.db   # только для sqlite
+  host: localhost       # дальше — только для mysql
   port: 3306
   name: tierplugin
   user: root
   password: ""
   pool-size: 5
 
-# ── Tier thresholds ─────────────────────────────────────────
-# Each tier requires: min_elo, min_skill, min_confidence, min_fights
-# confidence grows from 0 (new player, RD 350) to 1 (RD at min_rd)
+# ── Пороги тиров ─────────────────────────────────────────────
+# Для тира нужно выполнить всё сразу:
+#   min_elo        — рейтинг Elo не ниже
+#   min_skill      — навык (0–100) не ниже
+#   min_confidence — уверенность в оценке (0–1): растёт с каждым боем
+#   min_fights     — сыграно боёв не меньше
 tiers:
   LT5:
     min_elo: 800
@@ -26,81 +32,82 @@ tiers:
     min_elo: 950
     min_skill: 20.0
     min_confidence: 0.30
-    min_fights: 20
+    min_fights: 15
   LT4:
     min_elo: 1050
     min_skill: 30.0
     min_confidence: 0.40
-    min_fights: 30
+    min_fights: 20
   HT4:
     min_elo: 1150
     min_skill: 40.0
     min_confidence: 0.50
-    min_fights: 40
+    min_fights: 25
   LT3:
     min_elo: 1250
     min_skill: 50.0
     min_confidence: 0.55
-    min_fights: 50
+    min_fights: 30
   HT3:
     min_elo: 1380
     min_skill: 60.0
     min_confidence: 0.60
-    min_fights: 60
+    min_fights: 40
   LT2:
     min_elo: 1520
     min_skill: 68.0
     min_confidence: 0.65
-    min_fights: 80
+    min_fights: 50
   HT2:
     min_elo: 1670
     min_skill: 75.0
     min_confidence: 0.70
-    min_fights: 100
+    min_fights: 65
   LT1:
     min_elo: 1830
     min_skill: 82.0
     min_confidence: 0.75
-    min_fights: 130
+    min_fights: 80
   HT1:
     min_elo: 2000
     min_skill: 90.0
     min_confidence: 0.80
-    min_fights: 160
+    min_fights: 100
 
-# ── Elo parameters ───────────────────────────────────────────
-# Every gamemode has its own independent rating. Only sword is enabled for now.
+# ── Рейтинг Elo ──────────────────────────────────────────────
+# У каждого режима свой отдельный рейтинг. Сейчас включён только меч.
 elo:
-  initial_rating: 1000
-  initial_rd: 350           # rating deviation of a new player (uncertain → big Elo swings)
-  min_rd: 60                # RD floor = fully established player
-  rd_decay_per_match: 0.97  # RD *= this after every rated match
-  initial_volatility: 0.06  # reserved for Glicko-2
-  # Anti-abuse: Elo weight of the 1st, 2nd, 3rd... match vs the same opponent today
-  # (per gamemode). The last value applies to every further match.
+  initial_rating: 1000        # стартовый рейтинг
+  initial_rd: 350             # неуверенность в рейтинге новичка: чем больше, тем сильнее меняется Elo
+  min_rd: 60                  # минимальная неуверенность — рейтинг опытного игрока
+  rd_decay_per_match: 0.97    # после каждого боя неуверенность умножается на это число
+  initial_volatility: 0.06    # запас под Glicko-2, пока не используется
+  placement_k_multiplier: 1.5 # в боях калибровки (tier_rules.placement_fights) Elo меняется во столько раз быстрее
+  # Защита от фарма: вес 1-го, 2-го, 3-го… боя с одним и тем же соперником за день
+  # (отдельно по режиму). Последнее значение действует для всех следующих боёв.
   diminishing_returns:
     1: 1.00
     2: 0.70
     3: 0.50
     4: 0.30
     5: 0.10
-  # Beyond this many matches per pair per day the match is stored but unrated
+  # Сверх этого числа боёв пары за день бой сохраняется, но рейтинг не меняет
   max_daily_rated_matches_per_opponent: 20
 
-# ── Tier rules ───────────────────────────────────────────────
+# ── Правила тиров ────────────────────────────────────────────
 tier_rules:
-  placement_fights: 10      # until then the tier is a temporary estimate (provisional)
-  demotion_buffer_elo: 30   # a fixed tier is kept until Elo drops this far below its min_elo
+  placement_fights: 10      # столько боёв калибровки: до них тир временный (оценка по Elo и навыку)
+  demotion_buffer_elo: 30   # закреплённый тир снимается, только когда Elo ниже порога больше чем на это
 
-# ── Skill Score weights per gamemode (MVP: accuracy / damage / combo) ────────
-# accuracy = hit% during fight
-# damage   = total damage dealt, normalised to damage_cap
-# combo    = max hit streak, normalised to combo_cap
+# ── Навык (Skill Score, 0–100) ───────────────────────────────
+# Считается за каждый бой из трёх частей, веса задаются по режиму:
+#   accuracy — точность: попадания / атаки
+#   damage   — доля урона в бою: нанесено / (нанесено + получено)
+#   combo    — лучшая серия ударов относительно combo_cap
 skill_weights:
-  damage_cap: 200   # damage score = min(100, dealt / damage_cap * 100)
-  combo_cap:  20    # combo  score = min(100, maxCombo / combo_cap * 100)
-  ema_alpha:  0.2   # weight of the newest fight in the running skill score
-  # Disabled until their metrics are done; uncomment together with Gamemode.java
+  combo_cap:  8     # серия из 8 ударов и больше = 100 по комбо
+  ema_alpha:  0.2   # вес нового боя в общем навыке (остальное — история)
+  # Выключены, пока не готовы их метрики; включать вместе с Gamemode.java
   # crystal:
   #   accuracy: 0.40
   #   damage:   0.35
@@ -114,21 +121,21 @@ skill_weights:
   #   damage:   0.30
   #   combo:    0.30
 
-# ── Combat metrics tracker ───────────────────────────────────────────────────
+# ── Метрики боя ──────────────────────────────────────────────
 metrics:
-  combo_timeout_ms: 1500   # a hit streak breaks if the next hit comes later than this
-  combo_min_length: 2      # shortest streak counted as a combo (for avg / median)
-  summary_fights: 20       # /tieradmin metrics aggregates this many recent fights
+  combo_timeout_ms: 1500   # серия ударов прерывается, если следующий удар позже этого (мс)
+  combo_min_length: 2      # самая короткая серия, которая считается комбо (для среднего и медианы)
+  summary_fights: 20       # сколько последних боёв показывает /tieradmin metrics
 
-# ── Leaving a fight ──────────────────────────────────────────────────────────
+# ── Выход из боя ─────────────────────────────────────────────
 leave:
-  reconnect_grace_seconds: 30   # a disconnected player can rejoin and continue within this time
-  real_fight_seconds: 15        # the winner gets Elo for a forfeit only if a hit landed or the fight lasted this long
-  window_hours: 24              # leaves are counted over this period
-  penalty_multipliers: [1.0, 1.5, 2.0]  # leaver's Elo loss x this for the 1st, 2nd, 3rd+ leave in the window
-  cooldown_after_leaves: 3      # after this many leaves in the window...
-  cooldown_minutes: 10          # ...the player cannot start fights for this long (0 leaves = off)
+  reconnect_grace_seconds: 30   # столько секунд вылетевший игрок может вернуться и продолжить бой
+  real_fight_seconds: 15        # победитель получает Elo за выход соперника, только если был удар или бой шёл столько секунд
+  window_hours: 24              # за какой период считаются выходы
+  penalty_multipliers: [1.0, 1.5, 2.0]  # потеря Elo ушедшего × это за 1-й, 2-й, 3-й и следующие выходы
+  cooldown_after_leaves: 3      # после стольких выходов за период…
+  cooldown_minutes: 10          # …игрок не может начинать бои столько минут (0 выходов = выключено)
 
-# ── Match quality cap ────────────────────────────────────────────────────────
+# ── Качество матча ───────────────────────────────────────────
 match_rating:
-  score_diff_cap: 15   # max kills difference used in quality calculation
+  score_diff_cap: 15   # максимальная разница в счёте, которая учитывается в весе матча

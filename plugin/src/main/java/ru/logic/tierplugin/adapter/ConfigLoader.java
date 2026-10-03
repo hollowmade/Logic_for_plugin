@@ -36,7 +36,7 @@ public final class ConfigLoader {
             CoreConfig.TierThreshold def = d.tiers().get(tier);
             ConfigurationSection s = cfg.getConfigurationSection("tiers." + tier.name());
             if (s == null) {
-                log.warning("tiers." + tier.name() + " missing in config.yml, using defaults.");
+                log.warning("В config.yml нет раздела tiers." + tier.name() + " — используются значения по умолчанию.");
                 tiers.put(tier, def);
                 continue;
             }
@@ -56,7 +56,8 @@ public final class ConfigLoader {
                 cfg.getDouble("elo.min_rd", de.minRd()),
                 cfg.getDouble("elo.rd_decay_per_match", de.rdDecayPerMatch()),
                 loadDiminishing(cfg.getConfigurationSection("elo.diminishing_returns"), de.diminishingReturns()),
-                cfg.getInt("elo.max_daily_rated_matches_per_opponent", de.maxDailyRatedMatchesPerOpponent()));
+                cfg.getInt("elo.max_daily_rated_matches_per_opponent", de.maxDailyRatedMatchesPerOpponent()),
+                cfg.getDouble("elo.placement_k_multiplier", de.placementKMultiplier()));
 
         // ── Skill weights ──────────────────────────────────────
         CoreConfig.Skill ds = d.skill();
@@ -70,7 +71,6 @@ public final class ConfigLoader {
                     s.getDouble("combo", def.combo())));
         }
         CoreConfig.Skill skill = new CoreConfig.Skill(
-                cfg.getInt("skill_weights.damage_cap", ds.damageCap()),
                 cfg.getInt("skill_weights.combo_cap", ds.comboCap()),
                 cfg.getDouble("skill_weights.ema_alpha", ds.emaAlpha()),
                 weights);

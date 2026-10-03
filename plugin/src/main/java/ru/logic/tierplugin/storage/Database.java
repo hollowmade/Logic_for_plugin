@@ -53,7 +53,7 @@ public class Database {
             dataSource.close();
             throw e;
         }
-        log.info("Database ready (" + dialect + ").");
+        log.info("База данных готова (" + dialect + ").");
     }
 
     public SqlDialect dialect() { return dialect; }
@@ -95,7 +95,7 @@ public class Database {
                     throw e;
                 }
             } catch (SQLException e) {
-                log.log(Level.SEVERE, "Database operation failed", e);
+                log.log(Level.SEVERE, "Ошибка запроса к базе данных", e);
                 throw new StorageException(e);
             }
         }, executor);
@@ -106,7 +106,7 @@ public class Database {
         executor.shutdown();
         try {
             if (!executor.awaitTermination(10, TimeUnit.SECONDS)) {
-                log.warning("Database queue did not drain in 10s; some writes may be lost.");
+                log.warning("Очередь записи в базу не успела завершиться за 10 сек. — часть данных могла не сохраниться.");
                 executor.shutdownNow();
             }
         } catch (InterruptedException e) {
@@ -217,7 +217,7 @@ public class Database {
                 if (rs.next()) return;
             }
             st.executeUpdate("ALTER TABLE " + table + " ADD COLUMN " + column + " " + definition);
-            log.info("Added column " + table + "." + column + ".");
+            log.info("Добавлена колонка " + table + "." + column + ".");
         }
 
         private void index(Statement st, String name, String table, String columns) throws SQLException {
@@ -233,9 +233,9 @@ public class Database {
             try (ResultSet rs = st.executeQuery("SELECT COUNT(*) FROM " + table)) {
                 if (rs.next() && rs.getLong(1) == 0) {
                     st.executeUpdate("DROP TABLE " + table);
-                    log.info("Dropped empty legacy table " + table + ".");
+                    log.info("Удалена пустая старая таблица " + table + ".");
                 } else {
-                    log.warning("Legacy table " + table + " has data and was left untouched.");
+                    log.warning("В старой таблице " + table + " есть данные — она оставлена как есть.");
                 }
             } catch (SQLException ignored) {
                 // table does not exist — nothing to migrate

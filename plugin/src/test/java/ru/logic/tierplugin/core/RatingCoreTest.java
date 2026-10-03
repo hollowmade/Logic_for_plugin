@@ -109,8 +109,27 @@ class RatingCoreTest {
     @Test
     void skillScoreStaysInRange() {
         SkillScoreCalculator calc = service.getSkillCalculator();
-        assertEquals(100.0, calc.calculate(FightMetrics.basic(50, 0, 1000, 0, 40), Gamemode.SWORD), 1e-9);
-        assertEquals(50.0, calc.calculate(FightMetrics.basic(10, 10, 100, 0, 10), Gamemode.SWORD), 1e-9);
+        assertEquals(100.0, calc.calculate(FightMetrics.basic(50, 0, 20, 0, 40), Gamemode.SWORD), 1e-9);
+        // 50 % accuracy, half of the damage, combo 4 of 8
+        assertEquals(50.0, calc.calculate(FightMetrics.basic(10, 10, 10, 10, 4), Gamemode.SWORD), 1e-9);
+    }
+
+    @Test
+    void dominantFightScoresHigh() {
+        // 3/3 hits, 30 HP dealt, nothing taken, combo 3: a clean win
+        double s = service.getSkillCalculator().calculate(FightMetrics.basic(3, 0, 30, 0, 3), Gamemode.SWORD);
+        assertTrue(s > 80, "a flawless fight should score high, got " + s);
+    }
+
+    @Test
+    void placementMovesEloFaster() {
+        ModeRating w = fresh(), l = fresh();
+        double placement = service.process(w, l, sword(), 1).winner().eloDelta();
+        ModeRating vw = fresh(), vl = fresh();
+        vw.setFights(50);
+        vl.setFights(50);
+        double regular = service.process(vw, vl, sword(), 1).winner().eloDelta();
+        assertEquals(1.5, placement / regular, 1e-9);
     }
 
     @Test

@@ -33,10 +33,13 @@ public record CoreConfig(
      * @param rdDecayPerMatch    RD is multiplied by this after every rated match
      * @param diminishingReturns multipliers for the 1st, 2nd, 3rd… match against
      *                           the same opponent in a day; the last value applies to all further matches
+     * @param placementKMultiplier Elo moves this many times faster during placement fights,
+     *                           so a new player reaches their level sooner
      */
     public record Elo(double initialRating, double initialRd, double initialVolatility,
                       double minRd, double rdDecayPerMatch,
-                      double[] diminishingReturns, int maxDailyRatedMatchesPerOpponent) {
+                      double[] diminishingReturns, int maxDailyRatedMatchesPerOpponent,
+                      double placementKMultiplier) {
 
         public Elo {
             if (diminishingReturns.length == 0) {
@@ -56,8 +59,8 @@ public record CoreConfig(
         }
     }
 
-    /** Skill Score normalisation caps, per-gamemode weights and EMA smoothing. */
-    public record Skill(int damageCap, int comboCap, double emaAlpha, Map<Gamemode, Weights> weights) {
+    /** Skill Score combo normalisation, per-gamemode weights and EMA smoothing. */
+    public record Skill(int comboCap, double emaAlpha, Map<Gamemode, Weights> weights) {
 
         public Skill {
             weights = Map.copyOf(weights);
@@ -125,15 +128,15 @@ public record CoreConfig(
     public static CoreConfig defaults() {
         Map<Tier, TierThreshold> tiers = new EnumMap<>(Tier.class);
         tiers.put(Tier.LT5, new TierThreshold(800, 0, 0.20, 10));
-        tiers.put(Tier.HT5, new TierThreshold(950, 20, 0.30, 20));
-        tiers.put(Tier.LT4, new TierThreshold(1050, 30, 0.40, 30));
-        tiers.put(Tier.HT4, new TierThreshold(1150, 40, 0.50, 40));
-        tiers.put(Tier.LT3, new TierThreshold(1250, 50, 0.55, 50));
-        tiers.put(Tier.HT3, new TierThreshold(1380, 60, 0.60, 60));
-        tiers.put(Tier.LT2, new TierThreshold(1520, 68, 0.65, 80));
-        tiers.put(Tier.HT2, new TierThreshold(1670, 75, 0.70, 100));
-        tiers.put(Tier.LT1, new TierThreshold(1830, 82, 0.75, 130));
-        tiers.put(Tier.HT1, new TierThreshold(2000, 90, 0.80, 160));
+        tiers.put(Tier.HT5, new TierThreshold(950, 20, 0.30, 15));
+        tiers.put(Tier.LT4, new TierThreshold(1050, 30, 0.40, 20));
+        tiers.put(Tier.HT4, new TierThreshold(1150, 40, 0.50, 25));
+        tiers.put(Tier.LT3, new TierThreshold(1250, 50, 0.55, 30));
+        tiers.put(Tier.HT3, new TierThreshold(1380, 60, 0.60, 40));
+        tiers.put(Tier.LT2, new TierThreshold(1520, 68, 0.65, 50));
+        tiers.put(Tier.HT2, new TierThreshold(1670, 75, 0.70, 65));
+        tiers.put(Tier.LT1, new TierThreshold(1830, 82, 0.75, 80));
+        tiers.put(Tier.HT1, new TierThreshold(2000, 90, 0.80, 100));
 
         Map<Gamemode, Weights> weights = new EnumMap<>(Gamemode.class);
         // weights.put(Gamemode.CRYSTAL, new Weights(0.40, 0.35, 0.25)); // disabled, see Gamemode
@@ -142,8 +145,8 @@ public record CoreConfig(
 
         return new CoreConfig(
                 tiers,
-                new Elo(1000, 350, 0.06, 60, 0.97, new double[]{1.00, 0.70, 0.50, 0.30, 0.10}, 20),
-                new Skill(200, 20, 0.2, weights),
+                new Elo(1000, 350, 0.06, 60, 0.97, new double[]{1.00, 0.70, 0.50, 0.30, 0.10}, 20, 1.5),
+                new Skill(8, 0.2, weights),
                 new TierRules(10, 30),
                 15,
                 new Leave(new double[]{1.0, 1.5, 2.0}, 15_000, 24, 3, 10));

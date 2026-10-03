@@ -74,13 +74,13 @@ public class RatingService {
         // Past the daily pair cap a kill is recorded but changes nothing,
         // so farming one opponent cannot pile up fights, Elo or skill.
         if (weight > 0) {
-            winner.setElo(wElo + elo.delta(wElo, wRd, lElo, lRd, 1.0, weight));
+            winner.setElo(wElo + elo.delta(wElo, wRd, lElo, lRd, 1.0, weight * placementBoost(winner)));
             applyCommon(winner, leave ? null : wFight);
             winner.setWins(winner.getWins() + 1);
             tiers.evaluate(winner);
         }
         if (loserWeight > 0) {
-            loser.setElo(lElo + elo.delta(lElo, lRd, wElo, wRd, 0.0, loserWeight));
+            loser.setElo(lElo + elo.delta(lElo, lRd, wElo, wRd, 0.0, loserWeight * placementBoost(loser)));
             applyCommon(loser, leave ? null : lFight);
             loser.setLosses(loser.getLosses() + 1);
             tiers.evaluate(loser);
@@ -90,6 +90,11 @@ public class RatingService {
                 in.endReason(), leave ? leaveNumber : 0,
                 side(winner, wElo, wTier, wFight),
                 side(loser, lElo, lTier, lFight));
+    }
+
+    /** Elo moves faster while the player is still in placement, so they find their level sooner. */
+    private double placementBoost(ModeRating r) {
+        return r.getFights() < config.tierRules().placementFights() ? config.elo().placementKMultiplier() : 1.0;
     }
 
     /** A hit landed, or the fight lasted long enough to count. */

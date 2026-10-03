@@ -62,10 +62,10 @@ public class MetricsListener implements Listener {
         int tick = Bukkit.getCurrentTick();
         Integer useTick = lastUseTick.get(id);
         if (useTick != null && useTick == tick) {
-            if (debug) log.info("[metrics] tick " + tick + " SWING " + event.getPlayer().getName() + " (ignored: item use)");
+            if (debug) log.info("[метрики] тик " + tick + " ВЗМАХ " + event.getPlayer().getName() + " (пропущен: использование предмета)");
             return;
         }
-        if (debug) log.info("[metrics] tick " + tick + " SWING " + event.getPlayer().getName());
+        if (debug) log.info("[метрики] тик " + tick + " ВЗМАХ " + event.getPlayer().getName());
         tracker.swing(id, System.currentTimeMillis(), tick);
     }
 
@@ -93,7 +93,7 @@ public class MetricsListener implements Listener {
 
         if (byEntity.getDamager() == attacker && event.getCause() == EntityDamageEvent.DamageCause.ENTITY_ATTACK) {
             int tick = Bukkit.getCurrentTick();
-            if (debug) log.info(String.format("[metrics] tick %d HIT %s -> %s %.1f",
+            if (debug) log.info(String.format("[метрики] тик %d УДАР %s -> %s %.1f",
                     tick, attacker.getName(), victim.getName(), damage));
             tracker.meleeHit(attacker.getUniqueId(), victim.getUniqueId(), damage, System.currentTimeMillis(), tick);
         } else {

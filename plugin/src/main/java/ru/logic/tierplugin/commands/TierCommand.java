@@ -9,6 +9,7 @@ import ru.logic.tierplugin.LogicTierPlugin;
 import ru.logic.tierplugin.core.Gamemode;
 import ru.logic.tierplugin.core.ModeRating;
 import ru.logic.tierplugin.storage.Storage;
+import ru.logic.tierplugin.text.Text;
 
 import java.util.Map;
 import java.util.Optional;
@@ -31,7 +32,7 @@ public class TierCommand implements CommandExecutor {
         CompletableFuture<Optional<Storage.PlayerRef>> target;
         if (args.length == 0) {
             if (!(sender instanceof Player p)) {
-                sender.sendMessage("§cUsage: /tier <player>");
+                Text.error(sender, "Использование: /tier " + Text.arg("игрок"));
                 return true;
             }
             target = CompletableFuture.completedFuture(Optional.of(new Storage.PlayerRef(p.getUniqueId(), p.getName())));
@@ -45,9 +46,9 @@ public class TierCommand implements CommandExecutor {
                                 .thenApply(r -> Map.entry(ref.get(), r)))
                 .whenComplete((res, err) -> plugin.sync(() -> {
                     if (err != null) {
-                        sender.sendMessage("§cDatabase error, see console.");
+                        Text.error(sender, "Ошибка базы данных — подробности в консоли сервера.");
                     } else if (res == null) {
-                        sender.sendMessage("§cPlayer '" + args[0] + "' has never joined.");
+                        Text.error(sender, "Игрок <name> ещё не заходил на сервер.", Text.plain("name", args[0]));
                     } else {
                         show(sender, res.getKey().name(), res.getValue());
                     }
@@ -55,19 +56,26 @@ public class TierCommand implements CommandExecutor {
         return true;
     }
 
+    /** Profile card: one block per gamemode the player has fought in. */
     static void show(CommandSender sender, String name, Map<Gamemode, ModeRating> ratings) {
-        sender.sendMessage("§6=== §e" + name + "§6 ===");
+        Text.line(sender, Text.RULE);
+        Text.line(sender, " <gradient:#FFB347:#FF5E3A><bold>Профиль</bold></gradient> <white><bold><name></bold></white>",
+                Text.plain("name", name));
         if (ratings.isEmpty()) {
-            sender.sendMessage("§7No rated fights yet.");
-            return;
+            Text.line(sender, " <gray>Рейтинговых боёв пока нет.</gray>");
         }
         for (ModeRating r : ratings.values()) {
-            String tier = r.getTier() != null ? r.getTier().name() : "Unranked";
-            sender.sendMessage(String.format("§e%s§7: §f%s%s §7| Elo §f%.0f §8(RD %.0f)§7 | Skill §f%.1f"
-                            + " §7| Conf §f%.0f%% §7| §f%d§7 fights (§a%d§7/§c%d§7)",
-                    r.getGamemode(), tier, r.isProvisional() ? " §7(provisional)" : "",
-                    r.getElo(), r.getRatingDeviation(), r.getSkillScore(),
-                    r.getConfidence() * 100, r.getFights(), r.getWins(), r.getLosses()));
+            Text.line(sender, " <gray>" + Text.mode(r.getGamemode()) + "</gray> <dark_gray>»</dark_gray> "
+                    + Text.tier(r.getTier(), r.isProvisional()));
+            Text.line(sender, "   <gray>Рейтинг</gray> <white>" + Math.round(r.getElo()) + "</white> <dark_gray>±"
+                    + Math.round(r.getRatingDeviation()) + "</dark_gray>"
+                    + Text.DOT + "<gray>Навык</gray> <white>" + Text.num(r.getSkillScore(), 0) + "</white><dark_gray>/100</dark_gray>"
+                    + Text.DOT + "<hover:show_text:'<gray>Растёт с каждым боем. Временный тир\nфиксируется после боёв калибровки.</gray>'>"
+                    + "<gray>Уверенность</gray> <white>" + Text.percent(r.getConfidence()) + "</white></hover>");
+            Text.line(sender, "   <gray>Боёв</gray> <white>" + r.getFights() + "</white>"
+                    + Text.DOT + "<gray>Победы</gray> <green>" + r.getWins() + "</green>"
+                    + Text.DOT + "<gray>Поражения</gray> <red>" + r.getLosses() + "</red>");
         }
+        Text.line(sender, Text.RULE);
     }
 }

@@ -94,7 +94,7 @@ public final class Simulator {
         CoreConfig.Elo e = cfg.elo();
         CoreConfig noProtection = new CoreConfig(cfg.tiers(),
                 new CoreConfig.Elo(e.initialRating(), e.initialRd(), e.initialVolatility(), e.minRd(),
-                        e.rdDecayPerMatch(), new double[]{1.0}, Integer.MAX_VALUE),
+                        e.rdDecayPerMatch(), new double[]{1.0}, Integer.MAX_VALUE, e.placementKMultiplier()),
                 cfg.skill(), cfg.tierRules(), cfg.scoreDiffCap(), cfg.leave());
 
         ModeRating farmer = farmOneDay(cfg, matches);
@@ -144,9 +144,17 @@ public final class Simulator {
         String key = a.name().compareTo(b.name()) < 0 ? a.name() + ":" + b.name() : b.name() + ":" + a.name();
         int matchNumber = pairCountToday.merge(key, 1, Integer::sum);
 
+        FightMetrics wm = metrics(w.trueSkill(), true, rnd);
+        FightMetrics lm = metrics(l.trueSkill(), false, rnd);
+        // Each side takes what the other dealt
         MatchInput in = new MatchInput(Gamemode.SWORD, 1, 0,
-                metrics(w.trueSkill(), true, rnd), metrics(l.trueSkill(), false, rnd), 30_000);
+                withTaken(wm, lm.damageDealt()), withTaken(lm, wm.damageDealt()), 30_000);
         service.process(w.rating(), l.rating(), in, matchNumber);
+    }
+
+    private static FightMetrics withTaken(FightMetrics m, double taken) {
+        return new FightMetrics(m.swings(), m.hits(), m.damageDealt(), taken, m.maxCombo(),
+                m.avgCombo(), m.medianCombo(), m.combos(), m.avgCps(), m.maxCps());
     }
 
     /** Draws plausible combat metrics around a true skill level. */
@@ -155,8 +163,8 @@ public final class Simulator {
         int swings = 20 + rnd.nextInt(20);
         double acc = clamp(0.35 + 0.50 * q + rnd.nextGaussian() * 0.08, 0.05, 0.98);
         int hits = (int) Math.round(swings * acc);
-        int damage = (int) clamp(60 + 140 * q + rnd.nextGaussian() * 20 + (won ? 15 : -15), 0, 400);
-        int combo = (int) clamp(3 + 15 * q + rnd.nextGaussian() * 2, 0, hits);
+        int damage = won ? 20 : (int) clamp(4 + 14 * q + rnd.nextGaussian() * 3, 0, 19);
+        int combo = (int) clamp(1 + 7 * q + rnd.nextGaussian() * 1.5, 0, hits);
         return FightMetrics.basic(hits, swings - hits, damage, 0, combo);
     }
 
@@ -195,22 +203,22 @@ public final class Simulator {
 
     public static String format(Report r) {
         StringBuilder sb = new StringBuilder();
-        sb.append(String.format("Simulated %d players, %d matches%n", r.players(), r.matches()));
-        sb.append(String.format("Rank correlation Elo vs true skill: %.3f%n", r.spearman()));
-        sb.append("Tiers: ");
+        sb.append(String.format("Симуляция: %d игроков, %d матчей%n", r.players(), r.matches()));
+        sb.append(String.format("Совпадение рейтинга с настоящим уровнем (корреляция): %.3f%n", r.spearman()));
+        sb.append("Тиры: ");
         r.tierCounts().forEach((t, c) -> sb.append(t).append('=').append(c).append(' '));
-        sb.append(String.format("unranked=%d provisional=%d%n", r.unranked(), r.provisional()));
-        sb.append("Top by Elo:\n");
+        sb.append(String.format("без тира=%d временных=%d%n", r.unranked(), r.provisional()));
+        sb.append("Лучшие по рейтингу:\n");
         for (Row row : r.top()) {
-            sb.append(String.format("  %-6s true=%4.0f elo=%4.0f skill=%4.1f tier=%s fights=%d%n",
+            sb.append(String.format("  %-6s уровень=%4.0f рейтинг=%4.0f навык=%4.1f тир=%s боёв=%d%n",
                     row.name(), row.trueSkill(), row.elo(), row.skill(), row.tier(), row.fights()));
         }
         return sb.toString();
     }
 
     public static String format(FarmReport f) {
-        return String.format("Farm test: %d wins vs the same booster in one day: +%.0f Elo"
-                        + " (without protection: +%.0f), rated fights counted: %d%n",
+        return String.format("Тест фарма: %d побед над одним и тем же твинком за день: +%.0f Elo"
+                        + " (без защиты было бы +%.0f), засчитано боёв: %d%n",
                 f.matches(), f.eloGained(), f.eloGainedWithoutProtection(), f.ratedFights());
     }
 }

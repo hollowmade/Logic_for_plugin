@@ -49,8 +49,8 @@ public class FightListener implements Listener {
                 fights.killed(opponent);
             } else {
                 fights.cancelFight(dead.getUniqueId());
-                plugin.getLogger().info("Fight of " + dead.getName()
-                        + " ended without a kill by the opponent; unrated.");
+                plugin.getLogger().info("Бой игрока " + dead.getName()
+                        + " закончился не убийством соперником — без рейтинга.");
             }
         });
     }
@@ -60,7 +60,7 @@ public class FightListener implements Listener {
     public void onQuit(PlayerQuitEvent event) {
         Player player = event.getPlayer();
         if (fights.isInFight(player.getUniqueId())) {
-            plugin.getLogger().info(player.getName() + " disconnected mid-fight; waiting for reconnect.");
+            plugin.getLogger().info(player.getName() + " отключился во время боя — ждём возвращения.");
             fights.playerQuit(player.getUniqueId());
         }
     }

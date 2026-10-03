@@ -27,7 +27,8 @@ class LeaveRulesTest {
 
     @Test
     void penaltyEscalatesWithEachLeave() {
-        double base = -elo.delta(1000, 350, 1000, 350, 0, 1.0);
+        // Fresh players are in placement: Elo moves x1.5
+        double base = -elo.delta(1000, 350, 1000, 350, 0, config.elo().placementKMultiplier());
         for (int n = 1; n <= 4; n++) {
             ModeRating w = fresh(), l = fresh();
             service.process(w, l, leave(2, 20_000), 1, n);

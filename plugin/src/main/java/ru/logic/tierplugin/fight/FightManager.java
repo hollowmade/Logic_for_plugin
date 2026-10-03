@@ -1,5 +1,6 @@
 package ru.logic.tierplugin.fight;
 
+import net.kyori.adventure.text.Component;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import ru.logic.tierplugin.LogicTierPlugin;
@@ -8,6 +9,7 @@ import ru.logic.tierplugin.core.FightMetrics;
 import ru.logic.tierplugin.core.Gamemode;
 import ru.logic.tierplugin.core.MatchInput;
 import ru.logic.tierplugin.core.MatchOutcome;
+import ru.logic.tierplugin.text.Text;
 import ru.logic.tierplugin.tracker.ActiveFights;
 
 import java.util.ArrayList;
@@ -36,7 +38,7 @@ public class FightManager implements ActiveFights {
     private final Map<UUID, Fight> active = new ConcurrentHashMap<>();
 
     /** Messages for players who were offline when their fight was decided. */
-    private final Map<UUID, List<String>> pendingNotices = new ConcurrentHashMap<>();
+    private final Map<UUID, List<Component>> pendingNotices = new ConcurrentHashMap<>();
 
     public FightManager(LogicTierPlugin plugin, FightSettings settings) {
         this.plugin = plugin;
@@ -94,28 +96,28 @@ public class FightManager implements ActiveFights {
         if (f.disconnected() != null) {
             // The opponent is already gone too: nobody to award the win to
             cancelFight(player);
-            plugin.getLogger().info("Both players left a fight; cancelled unrated.");
+            plugin.getLogger().info("Оба игрока покинули бой — бой отменён без рейтинга.");
             return;
         }
 
         int grace = settings.reconnectGraceSeconds();
         f.markDisconnected(player, System.currentTimeMillis(),
                 Bukkit.getScheduler().runTaskLater(plugin, () -> graceExpired(f, player), grace * 20L));
-        notify(opponent, "§eYour opponent disconnected. Waiting §f" + grace
-                + "s§e for them to return, otherwise you win by forfeit.");
+        notify(opponent, Text.parse(Text.PREFIX + "<yellow>Соперник отключился.</yellow> <gray>Ждём <white>"
+                + grace + "</white> сек. — если не вернётся, победа засчитается тебе.</gray>"));
     }
 
     /** A player joined: resume their paused fight and deliver messages they missed. */
     public void playerJoin(Player player) {
         UUID id = player.getUniqueId();
-        List<String> notices = pendingNotices.remove(id);
+        List<Component> notices = pendingNotices.remove(id);
         if (notices != null) notices.forEach(player::sendMessage);
 
         Fight f = active.get(id);
         if (f != null && id.equals(f.disconnected())) {
             f.clearDisconnect();
-            player.sendMessage("§eYou are back in your fight. It continues.");
-            notify(f.ref().opponentOf(id), "§eYour opponent is back. The fight continues.");
+            Text.send(player, "<green>Ты вернулся — бой продолжается.</green>");
+            notify(f.ref().opponentOf(id), Text.parse(Text.PREFIX + "<green>Соперник вернулся — бой продолжается.</green>"));
         }
     }
 
@@ -148,9 +150,10 @@ public class FightManager implements ActiveFights {
         plugin.getStorage().recordMatch(winner, loser, in, plugin.getRatingService())
                 .whenComplete((out, err) -> plugin.sync(() -> {
                     if (err != null) {
-                        plugin.getLogger().log(Level.SEVERE, "Failed to record match", err);
-                        notify(winner, "§cMatch could not be saved, ratings unchanged.");
-                        notifyOrQueue(loser, "§cMatch could not be saved, ratings unchanged.");
+                        plugin.getLogger().log(Level.SEVERE, "Не удалось сохранить матч", err);
+                        Component msg = Text.parse(Text.PREFIX + "<#FF6B6B>Не удалось сохранить матч — рейтинг не изменён.");
+                        notify(winner, msg);
+                        notifyOrQueue(loser, msg);
                         return;
                     }
                     if (out.isLeave()) {
@@ -181,77 +184,89 @@ public class FightManager implements ActiveFights {
 
     private void report(UUID uuid, Gamemode gm, MatchOutcome out, MatchOutcome.Side side,
                         FightMetrics m, boolean won) {
-        notify(uuid, (won ? "§aVictory" : "§cDefeat") + " §7[" + gm + "]");
-        notify(uuid, formatMetrics(m));
-        if (!out.rated()) {
-            notify(uuid, "§7Unrated match: daily limit vs this opponent reached ("
-                    + out.matchNumberToday() + " today).");
-            return;
+        List<Component> card = new ArrayList<>();
+        card.add(title(won ? "<green><bold>⚔ ПОБЕДА</bold></green>" : "<red><bold>☠ ПОРАЖЕНИЕ</bold></red>", gm, null));
+        if (out.rated()) {
+            card.add(eloLine(side, won ? out.weight() : out.loserWeight(), false));
+        } else {
+            card.add(Text.parse(" <gray>Бой без рейтинга: это уже <white>" + out.matchNumberToday()
+                    + "</white>-й бой с этим соперником сегодня.</gray>"));
         }
-        notify(uuid, eloLine(side, won ? out.weight() : out.loserWeight(), "weight"));
-        tierLine(side).ifPresent(l -> notify(uuid, l));
+        card.add(tierLine(side));
+        card.add(Text.parse(" ").append(Text.metrics(m)));
+        notifyCard(uuid, card, false);
     }
 
     private void reportLeaveWinner(UUID uuid, Gamemode gm, MatchOutcome out, FightMetrics m) {
-        notify(uuid, "§aVictory §7[" + gm + "] §7— your opponent left the fight.");
-        notify(uuid, formatMetrics(m));
-        if (!out.rated()) {
-            notify(uuid, "§7No Elo for this win: the fight had not really started (no hits, too short).");
-            return;
+        List<Component> card = new ArrayList<>();
+        card.add(title("<green><bold>⚔ ПОБЕДА</bold></green>", gm, "соперник покинул бой"));
+        if (out.rated()) {
+            card.add(eloLine(out.winner(), out.weight(), false));
+            card.add(tierLine(out.winner()));
+        } else {
+            card.add(Text.parse(" <gray>Бой толком не начался (ни одного удара, меньше "
+                    + plugin.getRatingService().getConfig().leave().realFightMillis() / 1000
+                    + " сек.) — рейтинг не начислен.</gray>"));
         }
-        notify(uuid, eloLine(out.winner(), out.weight(), "weight"));
-        tierLine(out.winner()).ifPresent(l -> notify(uuid, l));
+        card.add(Text.parse(" ").append(Text.metrics(m)));
+        notifyCard(uuid, card, false);
     }
 
-    /** The leaver is usually offline: these messages wait for their next join. */
+    /** The leaver is usually offline: the card waits for their next join. */
     private void reportLeaver(UUID uuid, Gamemode gm, MatchOutcome out) {
         var leave = plugin.getRatingService().getConfig().leave();
-        notifyOrQueue(uuid, "§cYou left a " + gm + " fight and lost by forfeit"
-                + " §7(leave #" + out.leaveNumber() + " in " + leave.windowHours() + "h).");
-        notifyOrQueue(uuid, eloLine(out.loser(), out.loserWeight(), "penalty"));
-        tierLine(out.loser()).ifPresent(l -> notifyOrQueue(uuid, l));
+        List<Component> card = new ArrayList<>();
+        card.add(title("<red><bold>✖ ТЕХНИЧЕСКОЕ ПОРАЖЕНИЕ</bold></red>", gm, null));
+        card.add(Text.parse(" <gray>Ты покинул бой. Выход <white>№" + out.leaveNumber()
+                + "</white> за " + leave.windowHours() + " ч.</gray>"));
+        card.add(eloLine(out.loser(), out.loserWeight(), true));
+        card.add(tierLine(out.loser()));
         if (leave.cooldownAfterLeaves() > 0 && out.leaveNumber() >= leave.cooldownAfterLeaves()) {
-            notifyOrQueue(uuid, "§cToo many leaves: you cannot start fights for "
-                    + leave.cooldownMinutes() + " min.");
+            card.add(Text.parse(" <#FF6B6B>Слишком много выходов — " + leave.cooldownMinutes()
+                    + " мин. нельзя начинать бои.</#FF6B6B>"));
+        }
+        notifyCard(uuid, card, true);
+    }
+
+    private static Component title(String head, Gamemode gm, String note) {
+        return Text.parse(" " + head + Text.DOT + "<gray>" + Text.mode(gm) + "</gray>"
+                + (note != null ? Text.DOT + "<gray>" + note + "</gray>" : ""));
+    }
+
+    /** @param penalty show the weight as a leave penalty multiplier instead of a percentage */
+    private static Component eloLine(MatchOutcome.Side side, double weight, boolean penalty) {
+        String w = Math.abs(weight - 1) < 0.001 ? ""
+                : penalty ? " <dark_gray>штраф ×" + Text.num(weight, 1) + "</dark_gray>"
+                : " <dark_gray>вес " + Text.percent(weight) + "</dark_gray>";
+        return Text.parse(" <gray>Рейтинг</gray> <white>" + Math.round(side.eloBefore()) + "</white>" + Text.ARROW
+                + "<white>" + Math.round(side.eloAfter()) + "</white> <dark_gray>(</dark_gray>" + Text.delta(side.eloDelta())
+                + "<dark_gray>)</dark_gray>" + w);
+    }
+
+    private static Component tierLine(MatchOutcome.Side side) {
+        String tiers = side.tierChanged()
+                ? Text.tier(side.tierBefore()) + Text.ARROW + Text.tier(side.tierAfter())
+                : Text.tier(side.tierAfter());
+        return Text.parse(" <gray>Тир</gray> " + tiers + (side.provisional() ? " <gray>(временный)</gray>" : ""));
+    }
+
+    private void notifyCard(UUID uuid, List<Component> lines, boolean queueIfOffline) {
+        List<Component> all = new ArrayList<>();
+        all.add(Text.parse(Text.RULE));
+        all.addAll(lines);
+        all.add(Text.parse(Text.RULE));
+        for (Component c : all) {
+            if (queueIfOffline) notifyOrQueue(uuid, c); else notify(uuid, c);
         }
     }
 
-    /** @param weightLabel "weight" (shown as a percentage) or "penalty" (shown as a multiplier) */
-    private static String eloLine(MatchOutcome.Side side, double weight, String weightLabel) {
-        double d = side.eloDelta();
-        String w = Math.abs(weight - 1) < 0.001 ? ""
-                : weightLabel.equals("penalty") ? String.format(" §8penalty ×%.1f", weight)
-                : String.format(" §8weight %.0f%%", weight * 100);
-        return "§7Elo §f" + Math.round(side.eloBefore()) + " → " + Math.round(side.eloAfter())
-                + (d >= 0 ? " §a(+" : " §c(") + Math.round(d) + ")" + w;
-    }
-
-    private static Optional<String> tierLine(MatchOutcome.Side side) {
-        if (!side.tierChanged()) return Optional.empty();
-        return Optional.of("§6Tier: §f" + name(side.tierBefore()) + " → " + name(side.tierAfter())
-                + (side.provisional() ? " §7(provisional)" : ""));
-    }
-
-    /** One-line summary of fight metrics for chat. */
-    public static String formatMetrics(FightMetrics m) {
-        String acc = m.accuracy() < 0 ? "-" : String.format("%.0f%%", m.accuracy());
-        return String.format("§7Acc §f%s §8(%d/%d) §7| Dmg §f%.1f§7/§f%.1f §7| CPS §f%.1f §8(max %d)"
-                        + " §7| Combo max §f%d§7, avg §f%.1f§7, med §f%.1f §8(%d)",
-                acc, m.hits(), m.swings(), m.damageDealt(), m.damageTaken(),
-                m.avgCps(), m.maxCps(), m.maxCombo(), m.avgCombo(), m.medianCombo(), m.combos());
-    }
-
-    private static String name(Object tier) {
-        return tier == null ? "Unranked" : tier.toString();
-    }
-
-    private static void notify(UUID uuid, String msg) {
+    private static void notify(UUID uuid, Component msg) {
         Player p = Bukkit.getPlayer(uuid);
         if (p != null) p.sendMessage(msg);
     }
 
     /** Sends now if online, otherwise on the player's next join (until restart). */
-    private void notifyOrQueue(UUID uuid, String msg) {
+    private void notifyOrQueue(UUID uuid, Component msg) {
         Player p = Bukkit.getPlayer(uuid);
         if (p != null) p.sendMessage(msg);
         else pendingNotices.computeIfAbsent(uuid, k -> new ArrayList<>()).add(msg);
